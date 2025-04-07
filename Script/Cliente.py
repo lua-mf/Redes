@@ -6,6 +6,30 @@ PORT = 50000
 modo_operacao = 2
 tamanho_max = 3
 
+print("Selecione o modo de operação:")
+print("1 - Go-Back-N")
+print("2 - Repetição Seletiva")
+
+while True:
+    try:
+        modo_operacao = int(input("Digite o número do modo (1 ou 2): "))
+        if modo_operacao in [1, 2]:
+            break
+        else:
+            print("Modo inválido. Digite 1 ou 2.")
+    except ValueError:
+        print("Entrada inválida. Digite apenas números.")
+
+while True:
+    try:
+        tamanho_max = int(input("Digite o tamanho máximo (1 a 3): "))
+        if 1 <= tamanho_max <= 3:
+            break
+        else:
+            print("Tamanho inválido. Digite um número entre 1 e 3.")
+    except ValueError:
+        print("Entrada inválida. Digite apenas números.")
+
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
 try:
