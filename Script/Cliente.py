@@ -1,15 +1,13 @@
 import socket
+from time import sleep
 
 HOST = '127.0.0.1'
 PORT = 50000
 
-modo_operacao = 2
-tamanho_max = 3
-
+# Configuração inicial - solicita ao usuário
 print("Selecione o modo de operação:")
 print("1 - Go-Back-N")
 print("2 - Repetição Seletiva")
-
 while True:
     try:
         modo_operacao = int(input("Digite o número do modo (1 ou 2): "))
@@ -22,7 +20,7 @@ while True:
 
 while True:
     try:
-        tamanho_max = int(input("Digite o tamanho máximo (1 a 3): "))
+        tamanho_max = int(input("Digite o tamanho máximo do pacote (1 a 3): "))
         if 1 <= tamanho_max <= 3:
             break
         else:
@@ -30,28 +28,63 @@ while True:
     except ValueError:
         print("Entrada inválida. Digite apenas números.")
 
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+print("\nSelecione o modo de envio:")
+print("1 - Individual")
+print("2 - Lote")
+while True:
+    try:
+        modo_envio = int(input("Digite o número do modo de envio (1 ou 2): "))
+        if modo_envio in [1, 2]:
+            break
+        else:
+            print("Modo inválido. Digite 1 ou 2.")
+    except ValueError:
+        print("Entrada inválida. Digite apenas números.")
 
+# Cliente digita a mensagem completa
+mensagem = input("\nDigite a mensagem completa para enviar: ")
+
+# Divide a mensagem em pacotes conforme tamanho_max
+pacotes = [mensagem[i:i+tamanho_max] for i in range(0, len(mensagem), tamanho_max)]
+qtd_pacotes = len(pacotes)
+
+# Criação do socket
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 try:
     s.connect((HOST, PORT))
-    print(f"Conectado ao servidor {HOST}:{PORT}")
+    print(f"\nConectado ao servidor {HOST}:{PORT}")
     
-    mensagem_handshake = f"modo={modo_operacao},tamanho={tamanho_max}"
+    # Envia handshake com qtd_pacotes
+    mensagem_handshake = f"modo={modo_operacao},tamanho={tamanho_max},envio={modo_envio},qtd_pacotes={qtd_pacotes}"
     s.sendall(mensagem_handshake.encode())
     
     s.settimeout(5)
-    data = s.recv(1024)
-    resposta = data.decode()
+    resposta = s.recv(1024).decode()
     
     if resposta == "handshake_ok":
-        print("Handshake concluído com sucesso.")
+        print("Handshake concluído com sucesso.\n")
+        
+        # Implementação do modo de envio
+        if modo_envio == 1:
+            print("Enviando em modo INDIVIDUAL...\n")
+            # Modo individual: envia um pacote por vez com pequena pausa entre eles
+            for idx, pacote in enumerate(pacotes, 1):
+                s.sendall(pacote.encode())
+                print(f"Pacote {idx} enviado: '{pacote}'")
+                # Pequena pausa entre os pacotes no modo individual
+                if idx < len(pacotes):
+                    print("Aguardando 1 segundo para enviar o próximo pacote...")
+                    sleep(1)
+        else:
+            print("Enviando em modo LOTE...\n")
+            # Modo lote: envia todos os pacotes de uma vez, sem pausas
+            for idx, pacote in enumerate(pacotes, 1):
+                s.sendall(pacote.encode())
+                print(f"Pacote {idx} enviado: '{pacote}'")
+        
+        print("\nTodos os pacotes foram enviados. Comunicação encerrada.")
     else:
         print(f"Resposta inesperada do servidor: {resposta}")
-
-except socket.timeout:
-    print("O servidor demorou para responder, o tempo de espera foi excedido.")
-except ConnectionRefusedError:
-    print("Não foi possível se conectar ao servidor. Verifique se o servidor está em execução.")
 except Exception as e:
     print(f"Ocorreu um erro: {e}")
 finally:
