@@ -8,7 +8,7 @@ def calcular_checksum(pacote):
 HOST = '127.0.0.1'
 PORT = 50000
 
-# Configuração inicial - solicita ao usuário
+# Configuração inicial
 print("Selecione o modo de operação:")
 print("1 - Go-Back-N")
 print("2 - Repetição Seletiva")
@@ -50,7 +50,7 @@ while True:
 # Cliente digita a mensagem completa
 mensagem = input("\nDigite a mensagem completa para enviar: ")
 
-# Divide a mensagem em pacotes conforme tamanho_max
+# Divide a mensagem em pacotes conforme tamanho máximo
 pacotes = [mensagem[i:i+tamanho_max] for i in range(0, len(mensagem), tamanho_max)]
 qtd_pacotes = len(pacotes)
 
@@ -63,7 +63,7 @@ timers = {}  # Dicionário para guardar temporizadores
 def enviar_pacote(idx, pacote):
     def timeout():
         print(f"[TIMEOUT] Sem resposta para o pacote {idx}. Reenviando...")
-        enviar_pacote(idx, pacote)  # Reenvia o mesmo pacote
+        enviar_pacote(idx, pacote)
 
     checksum = calcular_checksum(pacote)
     pacote_enviado = f"{checksum:03d}|{idx:03d}|{pacote}"
@@ -93,7 +93,7 @@ try:
     
     resposta = s.recv(1024).decode()
     
-    if resposta == "handshake_ok":
+    if resposta == "ack_handshake":
         print("Handshake concluído com sucesso.\n")
         
         if modo_envio == 1:
@@ -133,8 +133,8 @@ try:
                 pacote_enviado = f"{checksum:03d}|{idx:03d}|{pacote}"
                 s.sendall(pacote_enviado.encode())
                 print(f"Pacote {idx} enviado: '{pacote_enviado}'")
-                
-                print("\nTodos os pacotes foram enviados.")
+
+            print("\nTodos os pacotes foram enviados.")
             
             try:
                 resposta = s.recv(1024).decode()
@@ -144,6 +144,9 @@ try:
                     print("\nResposta inesperada do servidor:", resposta)
             except socket.timeout:
                 print("\nTimeout esperando confirmação final do servidor.")
+
+    elif resposta == "nack_handshake":
+        print("Servidor rejeitou o handshake. Verifique os parâmetros e tente novamente.")
     else:
         print(f"Resposta inesperada do servidor: {resposta}")
 
