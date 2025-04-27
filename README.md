@@ -15,6 +15,8 @@ O cliente deverá se conectar com o servidor e enviar comunicações de texto. E
 - [x] ~~Conexão cliente-servidor via localhost (quando na mesma máquina) ou via IP~~
 - [x] ~~Comunicação deve ocorrer **via sockets**~~
 - [ ] Um protocolo de aplicação (regras a nível de aplicação) deve ser proposto e descrito (requisições e respostas descritas);
+  - [x] ~~Criação do `protocolo.md`~~
+  - [ ] Atualização do `protocolo.md` ao fim de todos os requisitos do projeto
 - [ ] **A aplicação deve permitir que todas as características do transporte confiável de dados (ver tabela 3.1 do livro) sejam verificadas** (independentemente do protocolo da camada de transporte);
   - [x] ~~Soma de verificação~~;
   - [x] ~~Temporizador~~;
@@ -32,7 +34,7 @@ O cliente deverá se conectar com o servidor e enviar comunicações de texto. E
 
 ## Calendário de entregas
 
-- [x] 07.04 - 15% - Aplicações cliente e servidor devem se conectar via socket e realizar o handshake inicial (trocando, pelo menos, modo de operação e tamanho máximo). (15%)
+- [x] ~~07.04 - 15% - Aplicações cliente e servidor devem se conectar via socket e realizar o handshake inicial (trocando, pelo menos, modo de operação e tamanho máximo). (15%)~~
 - [ ] 28.04 - 30% - Troca de mensagens entre cliente e servidor considerando um canal de comunicação erros e perdas não ocorrem.
 - [ ] 19.05 - 25% - Inserção de erros e perdas simulados, bem como a implementação do correto comportamento dos processos. (25%)
 - [ ] 28.05 - 30% - Entrega final.
