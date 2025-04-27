@@ -42,21 +42,21 @@ try:
         buffer_completo += dados
         
         while buffer_completo and pacotes_processados < qtd_pacotes:
-            if len(buffer_completo) < 4:
-                break  # espera pelo menos 4 caracteres: 3 checksum + 1 separador
+            if '|' not in buffer_completo:
+                break  # espera o separador
             
-            checksum_recebido = int(buffer_completo[:3])
-            if buffer_completo[3] != '|':
-                raise ValueError("Formato inválido de pacote recebido.")
-            
-            numero_sequencia = int(buffer_completo[4:7])
-            conteudo_pacote = buffer_completo[8:8+tamanho_max]
+            partes_pacote = buffer_completo.split('|', 2)
+            if len(partes_pacote) < 3:
+                break  # pacote incompleto, aguarda mais dados
 
+            checksum_recebido = int(partes_pacote[0])
+            numero_sequencia = int(partes_pacote[1])
+            conteudo_pacote = partes_pacote[2][:tamanho_max]
             
-            if len(conteudo_pacote) < min(tamanho_max, 1) and len(buffer_completo) < (4 + tamanho_max):
+            if len(conteudo_pacote) < 1:
                 break  # aguarda mais dados
-            
-            buffer_completo = buffer_completo[8+tamanho_max:]
+
+            buffer_completo = partes_pacote[2][tamanho_max:]
             
             checksum_calculado = calcular_checksum(conteudo_pacote)
             
@@ -74,13 +74,19 @@ try:
             if checksum_recebido == checksum_calculado:
                 print("- Status: Checksum OK!")
                 mensagem_completa += conteudo_pacote
-                conn.sendall(f"ack|{pacotes_processados}".encode())
+                if modo_envio == 1:
+                    conn.sendall(f"ack|{numero_sequencia}".encode())
             else:
                 print("- Status: ERRO de Checksum (pacote corrompido!)")
-                conn.sendall(f"nack|{pacotes_processados}".encode())
-            print("---------------------------")
+                if modo_envio == 1:
+                    conn.sendall(f"nack|{numero_sequencia}".encode())
+
     
     print(f"\nMensagem completa reconstruída: '{mensagem_completa}'")
+    
+    # Se modo lote, envia confirmação geral
+    if modo_envio == 2:
+        conn.sendall("todos_pacotes_recebidos".encode())
     
 except Exception as e:
     print(f"Erro ao processar: {e}")
