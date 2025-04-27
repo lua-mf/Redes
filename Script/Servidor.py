@@ -67,11 +67,14 @@ try:
             print(f"- Horário: {horario}")
             print(f"- Checksum recebido: {checksum_recebido}")
             print(f"- Checksum calculado: {checksum_calculado}")
+            
             if checksum_recebido == checksum_calculado:
                 print("- Status: Checksum OK!")
                 mensagem_completa += conteudo_pacote
+                conn.sendall(f"ack|{pacotes_processados}".encode())
             else:
                 print("- Status: ERRO de Checksum (pacote corrompido!)")
+                conn.sendall(f"nack|{pacotes_processados}".encode())
             print("---------------------------")
     
     print(f"\nMensagem completa reconstruída: '{mensagem_completa}'")

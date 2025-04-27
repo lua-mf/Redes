@@ -1,4 +1,5 @@
 import socket
+import threading
 from time import sleep
 
 def calcular_checksum(pacote):
@@ -55,44 +56,75 @@ qtd_pacotes = len(pacotes)
 
 # Criação do socket
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(5)
+
+timers = {}  # Dicionário para guardar temporizadores
+
+def enviar_pacote(idx, pacote):
+    def timeout():
+        print(f"[TIMEOUT] Sem resposta para o pacote {idx}. Reenviando...")
+        enviar_pacote(idx, pacote)  # Reenvia o mesmo pacote
+
+    checksum = calcular_checksum(pacote)
+    pacote_enviado = f"{checksum:03d}|{pacote}"
+    try:
+        s.sendall(pacote_enviado.encode())
+        print(f"Pacote {idx} enviado: '{pacote_enviado}'")
+    except Exception as e:
+        print(f"Erro ao enviar pacote {idx}: {e}")
+        return
+
+    # Inicia o temporizador para este pacote
+    timer = threading.Timer(2.0, timeout)
+    timer.start()
+    timers[idx] = timer
+
 try:
     s.connect((HOST, PORT))
     print(f"\nConectado ao servidor {HOST}:{PORT}")
     
-    # Envia handshake com qtd_pacotes
+    # Envia handshake
     mensagem_handshake = f"modo={modo_operacao},tamanho={tamanho_max},envio={modo_envio},qtd_pacotes={qtd_pacotes}"
     s.sendall(mensagem_handshake.encode())
     
-    s.settimeout(5)
     resposta = s.recv(1024).decode()
     
     if resposta == "handshake_ok":
         print("Handshake concluído com sucesso.\n")
         
-        # Implementação do modo de envio
         if modo_envio == 1:
             print("Enviando em modo INDIVIDUAL...\n")
             for idx, pacote in enumerate(pacotes, 1):
-                checksum = calcular_checksum(pacote)
-                pacote_enviado = f"{checksum:03d}|{pacote}"
-                s.sendall(pacote_enviado.encode())
-                print(f"Pacote {idx} enviado: '{pacote_enviado}'")
+                enviar_pacote(idx, pacote)
+
+                while True:
+                    try:
+                        resposta = s.recv(1024).decode()
+                        if resposta.startswith("ack|"):
+                            numero_pacote = int(resposta.split("|")[1])
+                            print(f"[ACK] Pacote {numero_pacote} confirmado.")
+                            timers[numero_pacote].cancel()
+                            break
+                        elif resposta.startswith("nack|"):
+                            numero_pacote = int(resposta.split("|")[1])
+                            print(f"[NACK] Erro no pacote {numero_pacote}, reenviando...")
+                            timers[numero_pacote].cancel()
+                            enviar_pacote(numero_pacote, pacotes[numero_pacote-1])
+                    except socket.timeout:
+                        continue
                 if idx < len(pacotes):
-                    print("Aguardando 1 segundo para enviar o próximo pacote...")
                     sleep(1)
+
         else:
-            print("Enviando em modo LOTE...\n")
-            for idx, pacote in enumerate(pacotes, 1):
-                checksum = calcular_checksum(pacote)
-                pacote_enviado = f"{checksum:03d}|{pacote}"
-                s.sendall(pacote_enviado.encode())
-                print(f"Pacote {idx} enviado: '{pacote_enviado}'")
-        
-        print("\nTodos os pacotes foram enviados.")
+            print("Modo LOTE ainda não implementado para temporizador individual.\n")
+        print("\nTodos os pacotes foram enviados e confirmados.")
     else:
         print(f"Resposta inesperada do servidor: {resposta}")
+
 except Exception as e:
     print(f"Ocorreu um erro: {e}")
 finally:
+    for t in timers.values():
+        t.cancel()
     s.close()
     print("Conexão fechada.")
