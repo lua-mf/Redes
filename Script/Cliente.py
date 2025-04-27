@@ -66,7 +66,7 @@ def enviar_pacote(idx, pacote):
         enviar_pacote(idx, pacote)  # Reenvia o mesmo pacote
 
     checksum = calcular_checksum(pacote)
-    pacote_enviado = f"{checksum:03d}|{pacote}"
+    pacote_enviado = f"{checksum:03d}|{idx:03d}|{pacote}"
     try:
         s.sendall(pacote_enviado.encode())
         print(f"Pacote {idx} enviado: '{pacote_enviado}'")

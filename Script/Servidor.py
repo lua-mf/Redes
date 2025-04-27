@@ -49,12 +49,14 @@ try:
             if buffer_completo[3] != '|':
                 raise ValueError("Formato inválido de pacote recebido.")
             
-            conteudo_pacote = buffer_completo[4:4+tamanho_max]
+            numero_sequencia = int(buffer_completo[4:7])
+            conteudo_pacote = buffer_completo[8:8+tamanho_max]
+
             
             if len(conteudo_pacote) < min(tamanho_max, 1) and len(buffer_completo) < (4 + tamanho_max):
                 break  # aguarda mais dados
             
-            buffer_completo = buffer_completo[4+tamanho_max:]
+            buffer_completo = buffer_completo[8+tamanho_max:]
             
             checksum_calculado = calcular_checksum(conteudo_pacote)
             
@@ -63,6 +65,7 @@ try:
             
             print(f"Pacote {pacotes_processados} recebido:")
             print(f"- Conteúdo: '{conteudo_pacote}'")
+            print(f"- Número de sequência: {numero_sequencia}")
             print(f"- Tamanho: {len(conteudo_pacote)}")
             print(f"- Horário: {horario}")
             print(f"- Checksum recebido: {checksum_recebido}")
