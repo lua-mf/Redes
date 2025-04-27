@@ -1,6 +1,9 @@
 import socket
 from datetime import datetime
 
+def calcular_checksum(pacote):
+    return sum(ord(char) for char in pacote) % 256
+
 HOST = 'localhost'
 PORT = 50000
 
@@ -26,42 +29,49 @@ try:
     conn.sendall("handshake_ok".encode())
     print("\nAguardando pacotes...\n")
     
-    # Buffer para armazenar todo o conteúdo recebido
     buffer_completo = ""
     pacotes_processados = 0
-    mensagem_completa = ""  # Variável para reconstruir/armazenar a mensagem completa
+    mensagem_completa = ""
     
     while pacotes_processados < qtd_pacotes:
-        # Recebendo dados
         dados = conn.recv(1024).decode()
         
-        if not dados:  # Se não receber nada, a conexão é fechada
+        if not dados:
             break
             
         buffer_completo += dados
         
-        # Processa pacotes completos do buffer
         while buffer_completo and pacotes_processados < qtd_pacotes:
-            # Extrai um pacote de acordo com o tamanho máximo
-            pacote = buffer_completo[:tamanho_max]
+            if len(buffer_completo) < 4:
+                break  # espera pelo menos 4 caracteres: 3 checksum + 1 separador
             
-            # Se não tem dados suficientes, aguarda mais
-            if len(pacote) < min(tamanho_max, 1) and len(buffer_completo) < tamanho_max:
-                break
-                
-            # Remove o pacote processado do buffer
-            buffer_completo = buffer_completo[len(pacote):]
+            checksum_recebido = int(buffer_completo[:3])
+            if buffer_completo[3] != '|':
+                raise ValueError("Formato inválido de pacote recebido.")
             
-            # Adiciona à variável mensagem_completa
-            mensagem_completa += pacote
+            conteudo_pacote = buffer_completo[4:4+tamanho_max]
             
-            pacotes_processados += 1
+            if len(conteudo_pacote) < min(tamanho_max, 1) and len(buffer_completo) < (4 + tamanho_max):
+                break  # aguarda mais dados
+            
+            buffer_completo = buffer_completo[4+tamanho_max:]
+            
+            checksum_calculado = calcular_checksum(conteudo_pacote)
+            
             horario = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+            pacotes_processados += 1
             
             print(f"Pacote {pacotes_processados} recebido:")
-            print(f"- Conteúdo: '{pacote}'")
-            print(f"- Tamanho: {len(pacote)}")
+            print(f"- Conteúdo: '{conteudo_pacote}'")
+            print(f"- Tamanho: {len(conteudo_pacote)}")
             print(f"- Horário: {horario}")
+            print(f"- Checksum recebido: {checksum_recebido}")
+            print(f"- Checksum calculado: {checksum_calculado}")
+            if checksum_recebido == checksum_calculado:
+                print("- Status: Checksum OK!")
+                mensagem_completa += conteudo_pacote
+            else:
+                print("- Status: ERRO de Checksum (pacote corrompido!)")
             print("---------------------------")
     
     print(f"\nMensagem completa reconstruída: '{mensagem_completa}'")

@@ -1,6 +1,9 @@
 import socket
 from time import sleep
 
+def calcular_checksum(pacote):
+    return sum(ord(char) for char in pacote) % 256
+
 HOST = '127.0.0.1'
 PORT = 50000
 
@@ -8,6 +11,7 @@ PORT = 50000
 print("Selecione o modo de operação:")
 print("1 - Go-Back-N")
 print("2 - Repetição Seletiva")
+
 while True:
     try:
         modo_operacao = int(input("Digite o número do modo (1 ou 2): "))
@@ -31,6 +35,7 @@ while True:
 print("\nSelecione o modo de envio:")
 print("1 - Individual")
 print("2 - Lote")
+
 while True:
     try:
         modo_envio = int(input("Digite o número do modo de envio (1 ou 2): "))
@@ -67,22 +72,23 @@ try:
         # Implementação do modo de envio
         if modo_envio == 1:
             print("Enviando em modo INDIVIDUAL...\n")
-            # Modo individual: envia um pacote por vez com pequena pausa entre eles
             for idx, pacote in enumerate(pacotes, 1):
-                s.sendall(pacote.encode())
-                print(f"Pacote {idx} enviado: '{pacote}'")
-                # Pequena pausa entre os pacotes no modo individual
+                checksum = calcular_checksum(pacote)
+                pacote_enviado = f"{checksum:03d}|{pacote}"
+                s.sendall(pacote_enviado.encode())
+                print(f"Pacote {idx} enviado: '{pacote_enviado}'")
                 if idx < len(pacotes):
                     print("Aguardando 1 segundo para enviar o próximo pacote...")
                     sleep(1)
         else:
             print("Enviando em modo LOTE...\n")
-            # Modo lote: envia todos os pacotes de uma vez, sem pausas
             for idx, pacote in enumerate(pacotes, 1):
-                s.sendall(pacote.encode())
-                print(f"Pacote {idx} enviado: '{pacote}'")
+                checksum = calcular_checksum(pacote)
+                pacote_enviado = f"{checksum:03d}|{pacote}"
+                s.sendall(pacote_enviado.encode())
+                print(f"Pacote {idx} enviado: '{pacote_enviado}'")
         
-        print("\nTodos os pacotes foram enviados. Comunicação encerrada.")
+        print("\nTodos os pacotes foram enviados.")
     else:
         print(f"Resposta inesperada do servidor: {resposta}")
 except Exception as e:
