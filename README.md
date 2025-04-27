@@ -10,22 +10,25 @@ Aplicação cliente-servidor capaz de, na camada de aplicação, fornecer um tra
 
 O cliente deverá se conectar com o servidor e enviar comunicações de texto. Essas comunicações devem possuir um limite máximo de caracteres enviado por vez (definido no início da comunicação). As mensagens (pacotes da camada de aplicação) devem conter no máximo 3 caracteres como carga útil. Ao chegarem ao servidor, os metadados das mensagens individuais devem ser impressos e quando a comunicação estiver completa, ela deve ser apresentada corretamente no lado servidor da aplicação. Os metadados das confirmações enviadas pelo servidor devem ser apresentadas pelo cliente à medida que chegarem.
 
-## Características específicas
+## Requisitos
 
-- [ ] O cliente deve ser capaz de se conectar ao servidor através do localhost (quando na mesma máquina) ou via IP.
-- [ ] A comunicação deve ocorrer **via sockets**;
+- [x] ~~Conexão cliente-servidor via localhost (quando na mesma máquina) ou via IP~~
+- [x] ~~Comunicação deve ocorrer **via sockets**~~
 - [ ] Um protocolo de aplicação (regras a nível de aplicação) deve ser proposto e descrito (requisições e respostas descritas);
 - [ ] **A aplicação deve permitir que todas as características do transporte confiável de dados (ver tabela 3.1 do livro) sejam verificadas** (independentemente do protocolo da camada de transporte);
-  - [x] **Soma de verificação**;
-  - [ ] **Temporizador**;
-  - [ ] **Número de sequência**;
-  - [ ] **Reconhecimento**;
-  - [ ] **Reconhecimento negativo**;
-  - [ ] **Janela, paralelismo**.
+  - [x] ~~Soma de verificação~~;
+  - [x] ~~Temporizador~~;
+  - [x] ~~Número de sequência~~;
+  - [ ] Reconhecimento;
+  - [ ] Reconhecimento negativo;
+  - [ ] Janela, paralelismo.
 - [ ] Falhas de integridade e/ou perdas de mensagens devem poder ser **simuladas**. Isto é, a nível de aplicação, deve ser possível inserir um ‘erro’ no lado cliente verificável pelo servidor;
-- [ ] Deve ser possível enviar pacotes da camada de aplicação isolados a partir do cliente ou lotes com destino ao servidor. O servidor poderá ser configurado para confirmar a recepção individual dessas mensagens ou em grupo (i.e. deve aceitar as duas configurações);
-- [ ] O código da aplicação bem como um relatório (incluindo o seu manual de utilização) devem ser apresentados e entregues no dia da apresentação
-- [ ] **Pontuação extra**: todos os grupos que implementarem algum método de checagem de integridade receberão *0,5 pontos adicionais* na prova.
+- [x] ~~Deve ser possível enviar pacotes da camada de aplicação isolados a partir do cliente ou lotes com destino ao servidor. O servidor poderá ser configurado para confirmar a recepção individual dessas mensagens ou em grupo (i.e. deve aceitar as duas configurações);~~ 
+- [ ] Apresentação
+  - [ ] Código da aplicação
+  - [ ] Relatório da aplicação
+  - [ ] Manual de utilização
+- [ ] **Pontuação extra**: implementar algum método de checagem de integridade (+0.5 na prova)
 
 ## Calendário de entregas
 
