@@ -48,15 +48,7 @@ while True:
         print("Entrada inválida. Digite apenas números.")
 
 if modo_envio == 2:
-    while True:
-        try:
-            tamanho_janela = int(input("Digite o tamanho da janela (para envio em lote): "))
-            if 1 <= tamanho_janela <= 10:
-                break
-            else:
-                print("Tamanho inválido. Digite um número entre 1 e 10.")
-        except ValueError:
-            print("Entrada inválida. Digite apenas números.")
+    tamanho_janela = 4
 else:
     tamanho_janela = 1  # No modo individual, a janela é sempre 1
 

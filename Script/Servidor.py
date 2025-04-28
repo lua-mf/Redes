@@ -45,8 +45,7 @@ try:
         exit()
 
     print(f"Modo de operação: {'Go-Back-N' if modo_operacao == 1 else 'Repetição Seletiva'}")
-    print(f"Tamanho máximo: {tamanho_max}, Modo de envio: {'Individual' if modo_envio == 1 else 'Lote'}")
-    print(f"Quantidade de pacotes: {qtd_pacotes}, Tamanho da janela: {tamanho_janela}")
+    print(f"Modo de envio: {'Individual' if modo_envio == 1 else 'Lote'}")
     conn.sendall("ack_handshake".encode())
 
     print("\nAguardando pacotes...\n")
@@ -121,15 +120,16 @@ try:
             print(f"Pacote recebido:")
             print(f"- Conteúdo: '{conteudo_pacote}'")
             print(f"- Número de sequência: {numero_sequencia}")
-            print(f"- Tamanho: {len(conteudo_pacote)}")
             print(f"- Horário: {horario}")
-            print(f"- Checksum recebido: {checksum_recebido}")
-            print(f"- Checksum calculado: {checksum_calculado}")
             
             if checksum_recebido == checksum_calculado:
                 print("- Status: Checksum OK!")
                 
                 if modo_operacao == 1:  # Go-Back-N
+                    if numero_sequencia < 1 or numero_sequencia > qtd_pacotes:
+                        print(f"- Número de sequência inválido: {numero_sequencia} (fora do intervalo esperado 1-{qtd_pacotes})")
+                        continue
+                    
                     if numero_sequencia == proximo_esperado:
                         # Pacote na ordem correta
                         mensagem_completa += conteudo_pacote
