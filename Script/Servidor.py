@@ -106,12 +106,12 @@ try:
                 
             # Se o conteúdo for menor que o tamanho máximo, pegamos só o que temos
             # (o último pacote pode ser menor)
-            if len(conteudo) <= tamanho_max:
+            if len(conteudo) <= 3:
                 conteudo_pacote = conteudo
                 buffer_completo = ""
             else:
-                conteudo_pacote = conteudo[:tamanho_max]
-                buffer_completo = conteudo[tamanho_max:]
+                conteudo_pacote = conteudo[:3]
+                buffer_completo = conteudo[3:]
             
             checksum_calculado = calcular_checksum(conteudo_pacote)
             
