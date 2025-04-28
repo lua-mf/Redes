@@ -63,7 +63,7 @@ else:
 # Cliente digita a mensagem completa
 while True:
     mensagem = input("\nDigite a mensagem completa para enviar: ")
-    if mensagem > limite_max:
+    if len(mensagem) > limite_max:
         print(f"Mensagem maior do que o limite máximo de {limite_max} caracteres")
     else:
         break
