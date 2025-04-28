@@ -1,5 +1,6 @@
 import socket
 from datetime import datetime
+from time import sleep
 
 def calcular_checksum(pacote):
     return sum(ord(char) for char in pacote) % 256
@@ -53,10 +54,16 @@ try:
     buffer_completo = ""
     pacotes_processados = 0
     mensagem_completa = ""
+    ultimo_ack_enviado = 0  # Para Go-Back-N: última confirmação enviada
     
     # Para armazenar pacotes fora de ordem (para repetição seletiva)
     pacotes_armazenados = {}
     proximo_esperado = 1  # Próximo número de sequência esperado
+    
+    # Variáveis para controle de ACKs no Go-Back-N em lote
+    pacotes_lote_gbn = []  # Lista para armazenar pacotes recebidos em lote no Go-Back-N
+    tempo_ultimo_pacote = datetime.now()  # Para controle de tempo entre pacotes
+    enviar_ack_pendente = False  # Flag para indicar que há ACK pendente para enviar
 
     while pacotes_processados < qtd_pacotes:
         dados = conn.recv(1024).decode()
@@ -109,6 +116,7 @@ try:
             checksum_calculado = calcular_checksum(conteudo_pacote)
             
             horario = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+            tempo_atual = datetime.now()
             
             print(f"Pacote recebido:")
             print(f"- Conteúdo: '{conteudo_pacote}'")
@@ -126,14 +134,30 @@ try:
                         # Pacote na ordem correta
                         mensagem_completa += conteudo_pacote
                         pacotes_processados += 1
+                        ultimo_ack_enviado = numero_sequencia  # Atualiza o último ACK
                         proximo_esperado += 1
                         
-                        conn.sendall(f"ack|{numero_sequencia}".encode())
+                        # Adiciona à lista de pacotes em lote
+                        pacotes_lote_gbn.append(numero_sequencia)
+                        
+                        # Comportamento diferente baseado no modo de envio
+                        if modo_envio == 1:  # Individual
+                            # No modo individual, enviamos ACK imediatamente
+                            sleep(0.05)  # Pequena pausa para evitar respostas misturadas
+                            conn.sendall(f"ack|{ultimo_ack_enviado}".encode())
+                            print(f"- ACK enviado para pacote {ultimo_ack_enviado}")
+                        else:  # Lote
+                            # No modo Lote, marcamos que há ACK pendente
+                            enviar_ack_pendente = True
                         
                     else:
                         # Pacote fora de ordem - descarta no Go-Back-N
                         print(f"- Pacote fora de ordem (esperava {proximo_esperado}, recebeu {numero_sequencia})")
-                        conn.sendall(f"ack|{proximo_esperado-1}".encode())
+                        
+                        # Enviamos ACK do último pacote recebido corretamente
+                        sleep(0.05)  # Pequena pausa para evitar respostas misturadas
+                        conn.sendall(f"ack|{ultimo_ack_enviado}".encode())
+                        print(f"- ACK enviado para pacote {ultimo_ack_enviado} (fora de ordem)")
                 
                 else:  # Repetição Seletiva
                     if numero_sequencia == proximo_esperado:
@@ -149,7 +173,10 @@ try:
                             pacotes_processados += 1
                             proximo_esperado += 1
                         
+                        # Enviamos ACK para este pacote específico
+                        sleep(0.05)  # Pequena pausa para evitar respostas misturadas
                         conn.sendall(f"ack|{numero_sequencia}".encode())
+                        print(f"- ACK enviado para pacote {numero_sequencia}")
                     
                     else:
                         # Pacote fora de ordem - armazena no Repetição Seletiva
@@ -158,25 +185,59 @@ try:
                             print(f"- Pacote fora de ordem armazenado (esperava {proximo_esperado}, recebeu {numero_sequencia})")
                             
                             # Envia ACK mesmo para pacotes fora de ordem
+                            sleep(0.05)  # Pequena pausa para evitar respostas misturadas
                             conn.sendall(f"ack|{numero_sequencia}".encode())
+                            print(f"- ACK enviado para pacote {numero_sequencia} (fora de ordem)")
                         else:
                             # Pacote duplicado, já processado
                             print(f"- Pacote duplicado (já processamos até {proximo_esperado-1}, recebeu {numero_sequencia})")
+                            sleep(0.05)  # Pequena pausa para evitar respostas misturadas
                             conn.sendall(f"ack|{numero_sequencia}".encode())
+                            print(f"- ACK enviado para pacote {numero_sequencia} (duplicado)")
             
             else:
                 print("- Status: ERRO de Checksum (pacote corrompido!)")
-                if modo_envio == 1:  # Individual
-                    if modo_operacao == 1:  # Go-Back-N
-                        conn.sendall(f"nack|{proximo_esperado}".encode())
-                    else:  # Repetição Seletiva
-                        conn.sendall(f"nack|{numero_sequencia}".encode())
+                # Enviamos NACK conforme o modo
+                sleep(0.05)  # Pequena pausa para evitar respostas misturadas
+                if modo_operacao == 1:  # Go-Back-N
+                    conn.sendall(f"nack|{proximo_esperado}".encode())
+                    print(f"- NACK enviado para pacote {proximo_esperado}")
+                else:  # Repetição Seletiva
+                    conn.sendall(f"nack|{numero_sequencia}".encode())
+                    print(f"- NACK enviado para pacote {numero_sequencia}")
             
             print("---------------------------")
+            
+            # Verificar se é hora de enviar ACK em lote (passou tempo suficiente desde o último pacote)
+            if modo_envio == 2:  # Apenas no modo lote
+                intervalo = (tempo_atual - tempo_ultimo_pacote).total_seconds()
+                tempo_ultimo_pacote = tempo_atual
+                
+                # Se já se passou tempo suficiente desde o último pacote recebido ou se é o último pacote esperado
+                if (modo_operacao == 1 and enviar_ack_pendente and 
+                    (intervalo > 0.1 or pacotes_processados >= qtd_pacotes)):
+                    if pacotes_lote_gbn:
+                        # Enviamos ACK apenas para o último pacote do lote
+                        ultimo_pacote_lote = max(pacotes_lote_gbn)
+                        sleep(0.05)  # Pequena pausa para evitar respostas misturadas
+                        conn.sendall(f"ack|{ultimo_pacote_lote}".encode())
+                        print(f"- ACK de lote enviado para pacote {ultimo_pacote_lote} (confirmando pacotes {pacotes_lote_gbn})")
+                        pacotes_lote_gbn = []  # Limpa a lista de pacotes em lote
+                        enviar_ack_pendente = False
     
     # Após processar todos os pacotes, enviar confirmação final para modo em lote
     if modo_envio == 2:
+        # Enviamos um último ACK pendente se houver
+        if modo_operacao == 1 and enviar_ack_pendente and pacotes_lote_gbn:
+            ultimo_pacote_lote = max(pacotes_lote_gbn)
+            sleep(0.05)  # Pequena pausa para evitar respostas misturadas
+            conn.sendall(f"ack|{ultimo_pacote_lote}".encode())
+            print(f"- ACK de lote final enviado para pacote {ultimo_pacote_lote}")
+        
+        # Pequena pausa para evitar respostas misturadas
+        sleep(0.05)
         conn.sendall("todos_pacotes_recebidos".encode())
+        print("- Mensagem 'todos_pacotes_recebidos' enviada")
     
     print(f"\nMensagem completa reconstruída: '{mensagem_completa}'")
     
