@@ -47,6 +47,19 @@ while True:
     except ValueError:
         print("Entrada inválida. Digite apenas números.")
 
+if modo_envio == 2:
+    while True:
+        try:
+            tamanho_janela = int(input("Digite o tamanho da janela (para envio em lote): "))
+            if 1 <= tamanho_janela <= 10:
+                break
+            else:
+                print("Tamanho inválido. Digite um número entre 1 e 10.")
+        except ValueError:
+            print("Entrada inválida. Digite apenas números.")
+else:
+    tamanho_janela = 1  # No modo individual, a janela é sempre 1
+
 # Cliente digita a mensagem completa
 mensagem = input("\nDigite a mensagem completa para enviar: ")
 
@@ -59,11 +72,30 @@ s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.settimeout(5)
 
 timers = {}  # Dicionário para guardar temporizadores
+lock = threading.Lock()  # Lock para sincronização
+pacotes_enviados = {}  # Status dos pacotes (enviados mas não confirmados)
+base = 1  # Base da janela (próximo pacote esperando confirmação)
+proximo_seq = 1  # Próximo número de sequência a ser usado
 
 def enviar_pacote(idx, pacote):
     def timeout():
-        print(f"[TIMEOUT] Sem resposta para o pacote {idx}. Reenviando...")
-        enviar_pacote(idx, pacote)
+        with lock:
+            # Verificar se o pacote ainda precisa ser reenviado
+            if idx in pacotes_enviados:
+                print(f"[TIMEOUT] Sem resposta para o pacote {idx}. Reenviando...")
+                if modo_operacao == 1:  # Go-Back-N
+                    # Reenvia todos os pacotes da janela atual
+                    for i in range(base, proximo_seq):
+                        if i <= qtd_pacotes:
+                            enviar_pacote_sem_timer(i, pacotes[i-1])
+                else:  # Repetição seletiva
+                    # Reenvia apenas o pacote que expirou
+                    enviar_pacote_sem_timer(idx, pacote)
+                
+                # Reinicia o temporizador
+                timer = threading.Timer(2.0, timeout)
+                timer.start()
+                timers[idx] = timer
 
     checksum = calcular_checksum(pacote)
     pacote_enviado = f"{checksum:03d}|{idx:03d}|{pacote}"
@@ -83,12 +115,100 @@ def enviar_pacote(idx, pacote):
     timer.start()
     timers[idx] = timer
 
+def enviar_pacote_sem_timer(idx, pacote):
+    checksum = calcular_checksum(pacote)
+    pacote_enviado = f"{checksum:03d}|{idx:03d}|{pacote}"
+    try:
+        s.sendall(pacote_enviado.encode())
+        print(f"Pacote {idx} reenviado: '{pacote_enviado}'")
+    except Exception as e:
+        print(f"Erro ao reenviar pacote {idx}: {e}")
+
+def thread_receptor():
+    global base, proximo_seq
+    
+    while base <= qtd_pacotes:
+        try:
+            resposta = s.recv(1024).decode()
+
+            # Dividir respostas concatenadas
+            respostas = resposta.replace("ack|", "\nack|").replace("nack|", "\nnack|").replace("todos_pacotes_recebidos", "\ntodos_pacotes_recebidos").split("\n")
+            for resp in respostas:
+                if not resp:
+                    continue
+
+                if resp.startswith("ack|"):
+                    try:
+                        numero_texto = resp.split("ack|")[1].split()[0]
+                        numero_pacote = int(numero_texto)
+                        print(f"[ACK] Pacote {numero_pacote} confirmado.")
+                    except Exception as e:
+                        print(f"Erro ao processar ACK: {e}")
+                        continue
+
+                    with lock:
+                        if numero_pacote in timers:
+                            timers[numero_pacote].cancel()
+                            del timers[numero_pacote]
+                        
+                        if numero_pacote in pacotes_enviados:
+                            del pacotes_enviados[numero_pacote]
+
+                        if modo_operacao == 1:  # Go-Back-N
+                            if numero_pacote == base:
+                                base += 1
+                                while proximo_seq < base + tamanho_janela and proximo_seq <= qtd_pacotes:
+                                    enviar_pacote(proximo_seq, pacotes[proximo_seq-1])
+                                    pacotes_enviados[proximo_seq] = True
+                                    proximo_seq += 1
+
+                        else:  # Repetição Seletiva
+                            while base not in pacotes_enviados and base <= qtd_pacotes:
+                                base += 1
+                            while proximo_seq < base + tamanho_janela and proximo_seq <= qtd_pacotes:
+                                enviar_pacote(proximo_seq, pacotes[proximo_seq-1])
+                                pacotes_enviados[proximo_seq] = True
+                                proximo_seq += 1
+
+                elif resp.startswith("nack|"):
+                    try:
+                        numero_pacote = int(resp.split("|")[1])
+                        print(f"[NACK] Erro no pacote {numero_pacote}, reenviando...")
+                    except Exception as e:
+                        print(f"Erro ao processar NACK: {e}")
+                        continue
+
+                    with lock:
+                        if numero_pacote in timers:
+                            timers[numero_pacote].cancel()
+
+                        if modo_operacao == 1:  # Go-Back-N
+                            base = numero_pacote
+                            for i in range(base, proximo_seq):
+                                if i <= qtd_pacotes:
+                                    enviar_pacote(i, pacotes[i-1])
+                                    pacotes_enviados[i] = True
+                        else:  # Repetição Seletiva
+                            if numero_pacote <= qtd_pacotes:
+                                enviar_pacote(numero_pacote, pacotes[numero_pacote-1])
+                                pacotes_enviados[numero_pacote] = True
+
+                elif resp.strip() == "todos_pacotes_recebidos":
+                    print("\nServidor confirmou recebimento de todos os pacotes.")
+                    return
+
+        except socket.timeout:
+            continue
+        except Exception as e:
+            print(f"Erro na thread receptora: {e}")
+            break
+
 try:
     s.connect((HOST, PORT))
     print(f"\nConectado ao servidor {HOST}:{PORT}")
     
     # Envia handshake
-    mensagem_handshake = f"modo={modo_operacao},tamanho={tamanho_max},envio={modo_envio},qtd_pacotes={qtd_pacotes}"
+    mensagem_handshake = f"modo={modo_operacao},tamanho={tamanho_max},envio={modo_envio},qtd_pacotes={qtd_pacotes},janela={tamanho_janela}"
     s.sendall(mensagem_handshake.encode())
     
     resposta = s.recv(1024).decode()
@@ -126,25 +246,30 @@ try:
                 if idx < len(pacotes):
                     sleep(1)
 
-        else:
-            print("Enviando em modo LOTE...\n")
-            for idx, pacote in enumerate(pacotes, 1):
-                checksum = calcular_checksum(pacote)
-                pacote_enviado = f"{checksum:03d}|{idx:03d}|{pacote}"
-                s.sendall(pacote_enviado.encode())
-                print(f"Pacote {idx} enviado: '{pacote_enviado}'")
-
-            print("\nTodos os pacotes foram enviados.")
+        else:  # Modo Lote (Janela Deslizante)
+            print(f"Enviando em modo LOTE com janela de tamanho {tamanho_janela}...\n")
             
-            try:
-                resposta = s.recv(1024).decode()
-                if resposta == "todos_pacotes_recebidos":
-                    print("\nServidor confirmou recebimento de todos os pacotes.")
-                else:
-                    print("\nResposta inesperada do servidor:", resposta)
-            except socket.timeout:
-                print("\nTimeout esperando confirmação final do servidor.")
+            # Inicia thread para receber ACKs/NACKs
+            receptor = threading.Thread(target=thread_receptor)
+            receptor.daemon = True
+            receptor.start()
+            
+            # Envia os primeiros pacotes (até o tamanho da janela)
+            with lock:
+                while proximo_seq <= min(tamanho_janela, qtd_pacotes):
+                    enviar_pacote(proximo_seq, pacotes[proximo_seq-1])
+                    pacotes_enviados[proximo_seq] = True  # Adicionar esta linha
+                    proximo_seq += 1
+            
+            # Aguarda até que todos os pacotes sejam confirmados
+            while base <= qtd_pacotes:
+                sleep(0.1)
 
+        print("\nAguardando últimas confirmações...")
+        sleep(5)  # Espera 2 segundos para ver todos os ACKs
+    
+        print("\nTodos os pacotes foram enviados e confirmados.")
+            
     elif resposta == "nack_handshake":
         print("Servidor rejeitou o handshake. Verifique os parâmetros e tente novamente.")
     else:
