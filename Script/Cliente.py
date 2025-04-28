@@ -8,7 +8,7 @@ def calcular_checksum(pacote):
 HOST = '127.0.0.1'
 PORT = 50000
 
-# Configuração inicial
+# Modo de operação
 print("Selecione o modo de operação:")
 print("1 - Go-Back-N")
 print("2 - Repetição Seletiva")
@@ -23,16 +23,16 @@ while True:
     except ValueError:
         print("Entrada inválida. Digite apenas números.")
 
+# limite máximo de caracteres enviado por vez
 while True:
     try:
-        tamanho_max = int(input("Digite o tamanho máximo do pacote (1 a 3): "))
-        if 1 <= tamanho_max <= 3:
+        limite_max = int(input("Digite o tamanho máximo da mensagem: ")) # quantidade de chars por comunicação
+        if 1 <= limite_max:
             break
-        else:
-            print("Entrada inválida. Digite um número entre 1 e 3.")
     except ValueError:
         print("Entrada inválida. Digite apenas números.")
 
+# Modo de envio
 print("\nSelecione o modo de envio:")
 print("1 - Individual")
 print("2 - Lote")
@@ -61,10 +61,15 @@ else:
     tamanho_janela = 1  # No modo individual, a janela é sempre 1
 
 # Cliente digita a mensagem completa
-mensagem = input("\nDigite a mensagem completa para enviar: ")
+while True:
+    mensagem = input("\nDigite a mensagem completa para enviar: ")
+    if mensagem > limite_max:
+        print(f"Mensagem maior do que o limite máximo de {limite_max} caracteres")
+    else:
+        break
 
-# Divide a mensagem em pacotes conforme tamanho máximo
-pacotes = [mensagem[i:i+tamanho_max] for i in range(0, len(mensagem), tamanho_max)]
+# Divide a mensagem em pacotes conforme tamanho máximo de 3 caracteres por pacote
+pacotes = [mensagem[i:i+3] for i in range(0, len(mensagem), 3)]
 qtd_pacotes = len(pacotes)
 
 # Criação do socket
@@ -315,7 +320,7 @@ try:
     print(f"\nConectado ao servidor {HOST}:{PORT}")
     
     # Envia handshake
-    mensagem_handshake = f"modo={modo_operacao},tamanho={tamanho_max},envio={modo_envio},qtd_pacotes={qtd_pacotes},janela={tamanho_janela}"
+    mensagem_handshake = f"modo={modo_operacao},limite máximo={limite_max}, envio={modo_envio},qtd_pacotes={qtd_pacotes},janela={tamanho_janela}"
     s.sendall(mensagem_handshake.encode())
     
     resposta = s.recv(1024).decode()
