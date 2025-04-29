@@ -47,16 +47,11 @@ while True:
     except ValueError:
         print("Entrada inválida. Digite apenas números.")
 
+# Tamanho de janela fixo em 4 com controle de congestionamento
 if modo_envio == 2:
-    while True:
-        try:
-            tamanho_janela = int(input("Digite o tamanho da janela (para envio em lote): "))
-            if 1 <= tamanho_janela <= 10:
-                break
-            else:
-                print("Tamanho inválido. Digite um número entre 1 e 10.")
-        except ValueError:
-            print("Entrada inválida. Digite apenas números.")
+    tamanho_janela_inicial = 4  # Tamanho inicial fixo da janela
+    tamanho_janela = tamanho_janela_inicial  # Tamanho atual da janela
+    print(f"Tamanho da janela inicial: {tamanho_janela}")
 else:
     tamanho_janela = 1  # No modo individual, a janela é sempre 1
 
@@ -84,14 +79,28 @@ base = 1  # Base da janela (próximo pacote esperando confirmação)
 proximo_seq = 1  # Próximo número de sequência a ser usado
 timer = None  # Timer para Go-Back-N no modo lote (um único timer para a janela inteira)
 
+# Variáveis de controle de congestionamento
+nacks_consecutivos = 0  # Contador de NACKs consecutivos
+threshold = 8  # Limite para o controle de congestionamento
+tamanho_janela_min = 1  # Tamanho mínimo da janela
+
 def temporizador_base():
     """Função chamada quando o temporizador da base expira no Go-Back-N"""
-    global timer
+    global timer, nacks_consecutivos, tamanho_janela
     
     with lock:
         print(f"[TIMEOUT] Sem resposta para a janela a partir da base {base}. Reenviando todos os pacotes...")
+        # Timeout também é considerado um erro de transmissão
+        nacks_consecutivos += 1
+        # Reduzir o tamanho da janela em caso de timeout
+        if modo_envio == 2 and nacks_consecutivos > 0:
+            tamanho_janela_antigo = tamanho_janela
+            tamanho_janela = max(tamanho_janela // 2, tamanho_janela_min)
+            if tamanho_janela_antigo != tamanho_janela:
+                print(f"[CONGESTIONAMENTO] Janela reduzida de {tamanho_janela_antigo} para {tamanho_janela} após timeout")
+        
         # Reenvia todos os pacotes a partir da base
-        for i in range(base, proximo_seq):
+        for i in range(base, min(base + tamanho_janela, proximo_seq)):
             if i <= qtd_pacotes:
                 enviar_pacote_sem_timer(i, pacotes[i-1])
         
@@ -113,7 +122,19 @@ def iniciar_timer_base():
 
 def timer_individual(idx, pacote):
     """Função chamada quando um temporizador individual expira"""
+    global nacks_consecutivos, tamanho_janela
+    
     print(f"[TIMEOUT] Sem resposta para o pacote {idx}. Reenviando...")
+    # Timeout também é considerado um erro de transmissão
+    nacks_consecutivos += 1
+    
+    # Reduzir o tamanho da janela em caso de timeout
+    if modo_envio == 2 and nacks_consecutivos > 0:
+        tamanho_janela_antigo = tamanho_janela
+        tamanho_janela = max(tamanho_janela // 2, tamanho_janela_min)
+        if tamanho_janela_antigo != tamanho_janela:
+            print(f"[CONGESTIONAMENTO] Janela reduzida de {tamanho_janela_antigo} para {tamanho_janela} após timeout")
+    
     enviar_pacote_sem_timer(idx, pacote)
     
     # Reinicia o temporizador
@@ -150,6 +171,17 @@ def enviar_pacote(idx, pacote):
                 with lock:
                     if idx in pacotes_enviados:  # Ainda não foi confirmado
                         print(f"[TIMEOUT] Sem resposta para o pacote {idx}. Reenviando...")
+                        # Timeout também é considerado um erro de transmissão
+                        global nacks_consecutivos, tamanho_janela
+                        nacks_consecutivos += 1
+                        
+                        # Reduzir o tamanho da janela em caso de timeout
+                        if nacks_consecutivos > 0:
+                            tamanho_janela_antigo = tamanho_janela
+                            tamanho_janela = max(tamanho_janela // 2, tamanho_janela_min)
+                            if tamanho_janela_antigo != tamanho_janela:
+                                print(f"[CONGESTIONAMENTO] Janela reduzida de {tamanho_janela_antigo} para {tamanho_janela} após timeout")
+                        
                         enviar_pacote_sem_timer(idx, pacote)
                         # Reinicia o temporizador
                         timer_individual = threading.Timer(2.0, timeout_seletivo)
@@ -193,7 +225,7 @@ def cancelar_timers():
 
 def thread_receptor():
     """Thread para receber e processar ACKs/NACKs do servidor"""
-    global base, proximo_seq, timer
+    global base, proximo_seq, timer, tamanho_janela, nacks_consecutivos
     
     while base <= qtd_pacotes:
         try:
@@ -210,6 +242,24 @@ def thread_receptor():
                         numero_texto = resp.split("ack|")[1].split()[0]
                         numero_pacote = int(numero_texto)
                         print(f"[ACK] Pacote {numero_pacote} confirmado.")
+                        
+                        # ACK bem-sucedido, zerar contador de NACKs consecutivos
+                        nacks_consecutivos = 0
+                        
+                        # Em caso de transmissão bem-sucedida, aumentamos gradualmente o tamanho da janela
+                        if modo_envio == 2:
+                            # Se já alcançamos o threshold, cresce linearmente (+1)
+                            if tamanho_janela >= threshold:
+                                if tamanho_janela < 2 * threshold:  # Limite máximo da janela
+                                    tamanho_janela_antigo = tamanho_janela
+                                    tamanho_janela += 1
+                                    print(f"[CONGESTIONAMENTO] Janela aumentada linearmente de {tamanho_janela_antigo} para {tamanho_janela}")
+                            else:
+                                # Antes do threshold, cresce exponencialmente (dobra)
+                                tamanho_janela_antigo = tamanho_janela
+                                tamanho_janela = min(tamanho_janela * 2, threshold)
+                                if tamanho_janela_antigo != tamanho_janela:
+                                    print(f"[CONGESTIONAMENTO] Janela aumentada exponencialmente de {tamanho_janela_antigo} para {tamanho_janela}")
                     except Exception as e:
                         print(f"Erro ao processar ACK: {e}")
                         continue
@@ -268,6 +318,17 @@ def thread_receptor():
                     try:
                         numero_pacote = int(resp.split("|")[1])
                         print(f"[NACK] Erro no pacote {numero_pacote}, reenviando...")
+                        
+                        # Incrementar contador de NACKs consecutivos e reduzir tamanho da janela
+                        nacks_consecutivos += 1
+                        
+                        # Reduzir tamanho da janela em caso de NACK (modo lote)
+                        if modo_envio == 2:
+                            tamanho_janela_antigo = tamanho_janela
+                            # Se recebemos NACK, voltamos ao slow start (reduz pela metade)
+                            tamanho_janela = max(tamanho_janela // 2, tamanho_janela_min)
+                            if tamanho_janela_antigo != tamanho_janela:
+                                print(f"[CONGESTIONAMENTO] Janela reduzida de {tamanho_janela_antigo} para {tamanho_janela} após NACK")
                     except Exception as e:
                         print(f"Erro ao processar NACK: {e}")
                         continue
@@ -285,8 +346,8 @@ def thread_receptor():
                                 # No Go-Back-N, volta a base para o pacote com erro
                                 base = numero_pacote
                                 
-                                # Reenvia todos os pacotes a partir da base
-                                for i in range(base, proximo_seq):
+                                # Reenvia todos os pacotes a partir da base, limitado pelo tamanho atual da janela
+                                for i in range(base, min(base + tamanho_janela, proximo_seq)):
                                     if i <= qtd_pacotes:
                                         enviar_pacote_sem_timer(i, pacotes[i-1])
                                 
@@ -361,7 +422,7 @@ try:
                     sleep(1)
 
         else:  # Modo Lote (Janela Deslizante)
-            print(f"Enviando em modo LOTE com janela de tamanho {tamanho_janela}...\n")
+            print(f"Enviando em modo LOTE com janela de controle de congestionamento (inicial={tamanho_janela})...\n")
             
             # Inicia thread para receber ACKs/NACKs
             receptor = threading.Thread(target=thread_receptor)
