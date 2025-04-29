@@ -210,7 +210,7 @@ def thread_receptor():
                         if modo_envio == 1:  # Individual
                             # Cancela o temporizador individual
                             if numero_pacote in timers:
-                                timers[numero_pacote].cancel()
+                                timers[numero_pacote].cancel()      
                         else:  # Lote
                             if modo_operacao == 1:  # Go-Back-N
                                 # No Go-Back-N, confirma cumulativamente até o número recebido
@@ -219,18 +219,17 @@ def thread_receptor():
                                     for i in range(base, numero_pacote + 1):
                                         if i in pacotes_enviados:
                                             del pacotes_enviados[i]
-                                    
                                     # Atualiza a base para o próximo pacote não confirmado
                                     base = numero_pacote + 1
+
+                                    # Avanço da janela
+                                    while proximo_seq < base + tamanho_janela and proximo_seq <= qtd_pacotes:
+                                            enviar_pacote(proximo_seq, pacotes[proximo_seq-1])
+                                            proximo_seq += 1
                                     
                                     # Reinicia o temporizador para a nova base (se ainda houver pacotes a confirmar)
                                     if base <= qtd_pacotes:
                                         iniciar_timer_base()
-                                        
-                                        # Envia mais pacotes se possível
-                                        while proximo_seq < base + tamanho_janela and proximo_seq <= qtd_pacotes:
-                                            enviar_pacote(proximo_seq, pacotes[proximo_seq-1])
-                                            proximo_seq += 1
                                     else:
                                         # Todos os pacotes foram confirmados, cancela o temporizador
                                         if timer is not None:
@@ -324,6 +323,7 @@ try:
             print("Enviando em modo INDIVIDUAL...\n")
             for idx, pacote in enumerate(pacotes, 1):
                 enviar_pacote(idx, pacote)
+                sleep(0.5)
 
                 tentativas = 0
                 while tentativas < 5:
