@@ -1,6 +1,9 @@
 import socket
 import threading
 from time import sleep
+import random  # Para simular erro/perda com probabilidade
+import time
+
 
 def calcular_checksum(pacote):
     return sum(ord(char) for char in pacote) % 256
@@ -23,7 +26,7 @@ while True:
     except ValueError:
         print("Entrada inválida. Digite apenas números.")
 
-# limite máximo de caracteres enviado por vez
+# Limite máximo de caracteres enviado por vez
 while True:
     try:
         limite_max = int(input("Digite o tamanho máximo da mensagem: ")) # quantidade de chars por comunicação
@@ -63,6 +66,19 @@ while True:
     else:
         break
 
+# Simulação separada de erros e perdas
+simular_perdas = input("\nDeseja simular PERDA de pacotes automaticamente? (s/n): ").strip().lower() == 's'
+if simular_perdas:
+    prob_perda = float(input("Probabilidade de PERDA (0 a 1): "))
+else:
+    prob_perda = 0.0
+
+simular_erros = input("Deseja simular ERROS de pacotes automaticamente? (s/n): ").strip().lower() == 's'
+if simular_erros:
+    prob_erro = float(input("Probabilidade de ERRO (0 a 1): "))
+else:
+    prob_erro = 0.0
+
 # Divide a mensagem em pacotes conforme tamanho máximo de 3 caracteres por pacote
 pacotes = [mensagem[i:i+3] for i in range(0, len(mensagem), 3)]
 qtd_pacotes = len(pacotes)
@@ -88,6 +104,8 @@ def temporizador_base():
     """Função chamada quando o temporizador da base expira no Go-Back-N"""
     global timer, nacks_consecutivos, tamanho_janela
     
+    print(f"[DEBUG] Temporizador da base {base} expirou! Hora: {time.strftime('%H:%M:%S')}")
+
     with lock:
         print(f"[TIMEOUT] Sem resposta para a janela a partir da base {base}. Reenviando todos os pacotes...")
         # Timeout também é considerado um erro de transmissão
@@ -107,6 +125,7 @@ def temporizador_base():
         # Reinicia o temporizador
         timer = threading.Timer(2.0, temporizador_base)
         timer.start()
+        print(f"[DEBUG] Timer da base {base} reiniciado após timeout! Hora: {time.strftime('%H:%M:%S')}")
 
 def iniciar_timer_base():
     """Inicia ou reinicia o temporizador da base para Go-Back-N"""
@@ -119,6 +138,7 @@ def iniciar_timer_base():
     # Cria e inicia um novo timer
     timer = threading.Timer(2.0, temporizador_base)
     timer.start()
+    print(f"[DEBUG] Timer da base {base} iniciado! Hora: {time.strftime('%H:%M:%S')}")
 
 def timer_individual(idx, pacote):
     """Função chamada quando um temporizador individual expira"""
@@ -145,7 +165,28 @@ def enviar_pacote(idx, pacote):
     """Envia um pacote e gerencia temporizadores conforme o modo de operação"""
     global timer
     
-    checksum = calcular_checksum(pacote)
+    # checksum = calcular_checksum(pacote)
+
+    # Simulação de perda
+    if simular_perdas and random.random() < prob_perda:
+        print(f"[SIMULAÇÃO] Pacote {idx} NÃO enviado (simulação de PERDA).")
+        ###return
+
+        ###########
+        # Se for o pacote base e estamos no modo Go-Back-N, precisamos garantir que o timer seja iniciado
+        if idx == base and modo_operacao == 1 and modo_envio == 2:
+            print(f"[DEBUG] Iniciando timer para o pacote base {base} mesmo após perda simulada")
+            iniciar_timer_base()
+            
+        return False  # Indica que o pacote não foi enviado
+        ###########
+    # Simulação de erro
+    if simular_erros and random.random() < prob_erro:
+        checksum = (calcular_checksum(pacote) + 1) % 256
+        print(f"[SIMULAÇÃO] Pacote {idx} enviado com CHECKSUM ERRADO.")
+    else:
+        checksum = calcular_checksum(pacote)
+
     pacote_enviado = f"{checksum:03d}|{idx:03d}|{pacote}"
     try:
         s.sendall(pacote_enviado.encode())
@@ -153,7 +194,7 @@ def enviar_pacote(idx, pacote):
         pacotes_enviados[idx] = True
     except Exception as e:
         print(f"Erro ao enviar pacote {idx}: {e}")
-        return
+        return False
 
     # Gerencia temporizadores de forma diferente para cada modo
     if modo_envio == 1:  # Individual
@@ -192,6 +233,7 @@ def enviar_pacote(idx, pacote):
             timer_individual = threading.Timer(2.0, timeout_seletivo)
             timer_individual.start()
             pacotes_enviados[idx] = (timer_individual, True)  # Armazena o timer e estado
+    return True  # Indica que o pacote foi enviado
 
 def enviar_pacote_sem_timer(idx, pacote):
     """Envia um pacote sem gerenciar temporizadores (usado em retransmissões)"""
@@ -222,6 +264,17 @@ def cancelar_timers():
             if isinstance(pacotes_enviados[idx], tuple):
                 timer_individual, _ = pacotes_enviados[idx]
                 timer_individual.cancel()
+
+def verificador_de_timeout():
+    """Thread para verificar periodicamente se o timer da base está funcionando"""
+    global base, timer
+    
+    while base <= qtd_pacotes:
+        time.sleep(3)  # Verifica a cada 3 segundos
+        with lock:
+            if base <= qtd_pacotes and timer is None and modo_operacao == 1 and modo_envio == 2:
+                print(f"[ALERTA] Timer da base {base} não está ativo! Reiniciando...")
+                iniciar_timer_base()
 
 def thread_receptor():
     """Thread para receber e processar ACKs/NACKs do servidor"""
@@ -429,12 +482,26 @@ try:
             receptor.daemon = True
             receptor.start()
             
+            # Adicione o verificador de timeout
+            verificador = threading.Thread(target=verificador_de_timeout)
+            verificador.daemon = True
+            verificador.start()
+
             # Envia os primeiros pacotes (até o tamanho da janela)
             with lock:
                 while proximo_seq <= min(tamanho_janela, qtd_pacotes):
                     enviar_pacote(proximo_seq, pacotes[proximo_seq-1])
                     proximo_seq += 1
             
+            #########
+            # Garantir que o timer da base seja iniciado mesmo se o primeiro pacote for perdido
+            if proximo_seq == 2 and modo_operacao == 1:  # Go-Back-N
+                print("[DEBUG] Verificando se o timer da base foi iniciado...")
+            if timer is None:
+                print("[DEBUG] Timer da base não foi iniciado! Iniciando agora...")
+                iniciar_timer_base()
+            ##########
+
             # Aguarda até que todos os pacotes sejam confirmados
             while base <= qtd_pacotes:
                 sleep(0.1)
