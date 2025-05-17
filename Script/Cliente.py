@@ -165,21 +165,17 @@ def enviar_pacote(idx, pacote):
     """Envia um pacote e gerencia temporizadores conforme o modo de operação"""
     global timer
     
-    # checksum = calcular_checksum(pacote)
-
     # Simulação de perda
     if simular_perdas and random.random() < prob_perda:
         print(f"[SIMULAÇÃO] Pacote {idx} NÃO enviado (simulação de PERDA).")
-        ###return
-
-        ###########
+        
         # Se for o pacote base e estamos no modo Go-Back-N, precisamos garantir que o timer seja iniciado
         if idx == base and modo_operacao == 1 and modo_envio == 2:
             print(f"[DEBUG] Iniciando timer para o pacote base {base} mesmo após perda simulada")
             iniciar_timer_base()
             
         return False  # Indica que o pacote não foi enviado
-        ###########
+    
     # Simulação de erro
     if simular_erros and random.random() < prob_erro:
         checksum = (calcular_checksum(pacote) + 1) % 256
@@ -237,7 +233,16 @@ def enviar_pacote(idx, pacote):
 
 def enviar_pacote_sem_timer(idx, pacote):
     """Envia um pacote sem gerenciar temporizadores (usado em retransmissões)"""
-    checksum = calcular_checksum(pacote)
+    # Simulação de perda na retransmissão - NÃO aplicamos aqui para garantir a retransmissão
+    # sempre aconteça quando solicitada explicitamente
+    
+    # Simulação de erro na retransmissão
+    if simular_erros and random.random() < prob_erro:
+        checksum = (calcular_checksum(pacote) + 1) % 256
+        print(f"[SIMULAÇÃO] Pacote {idx} reenviado com CHECKSUM ERRADO.")
+    else:
+        checksum = calcular_checksum(pacote)
+        
     pacote_enviado = f"{checksum:03d}|{idx:03d}|{pacote}"
     try:
         s.sendall(pacote_enviado.encode())
@@ -443,36 +448,95 @@ try:
         
         if modo_envio == 1:  # Modo Individual
             print("Enviando em modo INDIVIDUAL...\n")
-            for idx, pacote in enumerate(pacotes, 1):
-                enviar_pacote(idx, pacote)
-                sleep(0.5)
-
+            
+            # Implementação revisada do modo individual
+            idx = 1
+            max_tentativas_por_pacote = 5
+            
+            while idx <= len(pacotes):
+                pacote = pacotes[idx-1]
+                
+                # Tenta enviar o pacote atual
+                enviado = enviar_pacote(idx, pacote)
+                if not enviado:
+                    # Se a simulação de perda impediu o envio, precisamos reenviar explicitamente
+                    print(f"[RECUPERAÇÃO] Tentando reenviar pacote {idx} após simulação de perda...")
+                    sleep(0.5)
+                    enviar_pacote_sem_timer(idx, pacote)
+                
+                # Aguarda confirmação com timeout
                 tentativas = 0
-                while tentativas < 5:
+                pacote_confirmado = False
+                
+                while tentativas < max_tentativas_por_pacote and not pacote_confirmado:
                     try:
                         resposta = s.recv(1024).decode()
-                        if resposta.startswith("ack|"):
-                            numero_pacote = int(resposta.split("|")[1])
-                            print(f"[ACK] Pacote {numero_pacote} confirmado.")
-                            if numero_pacote in timers:
-                                timers[numero_pacote].cancel()
+                        
+                        # Dividir respostas concatenadas
+                        respostas = resposta.replace("ack|", "\nack|").replace("nack|", "\nnack|").split("\n")
+                        for resp in respostas:
+                            if not resp:
+                                continue
+                                
+                            if resp.startswith("ack|"):
+                                try:
+                                    numero_texto = resp.split("ack|")[1].split()[0]
+                                    numero_pacote = int(numero_texto)
+                                    print(f"[ACK] Pacote {numero_pacote} confirmado.")
+                                    
+                                    # Verifica se é o pacote atual
+                                    if numero_pacote == idx:
+                                        pacote_confirmado = True
+                                        # Cancela o temporizador individual se existir
+                                        if idx in timers:
+                                            timers[idx].cancel()
+                                        break
+                                    
+                                except Exception as e:
+                                    print(f"Erro ao processar ACK: {e}")
+                                    continue
+                                    
+                            elif resp.startswith("nack|"):
+                                try:
+                                    numero_pacote = int(resp.split("|")[1])
+                                    print(f"[NACK] Erro no pacote {numero_pacote}, reenviando...")
+                                    
+                                    # Verifica se é o pacote atual
+                                    if numero_pacote == idx:
+                                        # Cancela o temporizador individual se existir
+                                        if idx in timers:
+                                            timers[idx].cancel()
+                                        
+                                        # Reenvia o pacote
+                                        enviar_pacote(idx, pacotes[idx-1])
+                                        tentativas += 1
+                                except Exception as e:
+                                    print(f"Erro ao processar NACK: {e}")
+                                    continue
+                                    
+                        if pacote_confirmado:
                             break
-                        elif resposta.startswith("nack|"):
-                            numero_pacote = int(resposta.split("|")[1])
-                            print(f"[NACK] Erro no pacote {numero_pacote}, reenviando...")
-                            if numero_pacote in timers:
-                                timers[numero_pacote].cancel()
-                            enviar_pacote(numero_pacote, pacotes[numero_pacote-1])
+                            
                     except socket.timeout:
                         tentativas += 1
                         print(f"[TIMEOUT] Tentativa {tentativas} aguardando ACK/NACK para pacote {idx}...")
+                        # Reenviar o pacote após timeout
+                        if tentativas < max_tentativas_por_pacote:
+                            enviar_pacote_sem_timer(idx, pacote)
                 
-                if tentativas == 5:
-                    print(f"[ERRO] Pacote {idx} falhou após múltiplas tentativas. Encerrando envio.")
-                    break
-
-                if idx < len(pacotes):
-                    sleep(1)
+                if not pacote_confirmado:
+                    print(f"[ERRO] Pacote {idx} falhou após {max_tentativas_por_pacote} tentativas.")
+                    if idx < len(pacotes):
+                        resposta = input(f"Deseja continuar com o próximo pacote? (s/n): ").strip().lower()
+                        if resposta != 's':
+                            print("Envio interrompido pelo usuário.")
+                            break
+                
+                # Avança para o próximo pacote
+                if pacote_confirmado or tentativas >= max_tentativas_por_pacote:
+                    idx += 1
+                    if idx <= len(pacotes):
+                        sleep(0.5)  # Pequena pausa entre pacotes
 
         else:  # Modo Lote (Janela Deslizante)
             print(f"Enviando em modo LOTE com janela de controle de congestionamento (inicial={tamanho_janela})...\n")
@@ -493,14 +557,12 @@ try:
                     enviar_pacote(proximo_seq, pacotes[proximo_seq-1])
                     proximo_seq += 1
             
-            #########
             # Garantir que o timer da base seja iniciado mesmo se o primeiro pacote for perdido
             if proximo_seq == 2 and modo_operacao == 1:  # Go-Back-N
                 print("[DEBUG] Verificando se o timer da base foi iniciado...")
-            if timer is None:
-                print("[DEBUG] Timer da base não foi iniciado! Iniciando agora...")
-                iniciar_timer_base()
-            ##########
+                if timer is None:
+                    print("[DEBUG] Timer da base não foi iniciado! Iniciando agora...")
+                    iniciar_timer_base()
 
             # Aguarda até que todos os pacotes sejam confirmados
             while base <= qtd_pacotes:
