@@ -69,13 +69,15 @@ while True:
 # Simulação separada de erros e perdas
 simular_perdas = input("\nDeseja simular PERDA de pacotes automaticamente? (s/n): ").strip().lower() == 's'
 if simular_perdas:
-    prob_perda = float(input("Probabilidade de PERDA (0 a 1): "))
+    prob_perda_percentual = int(input("Probabilidade de PERDA em % (0 a 100): "))
+    prob_perda = prob_perda_percentual / 100.0
 else:
     prob_perda = 0.0
 
 simular_erros = input("Deseja simular ERROS de pacotes automaticamente? (s/n): ").strip().lower() == 's'
 if simular_erros:
-    prob_erro = float(input("Probabilidade de ERRO (0 a 1): "))
+    prob_erro_percentual = int(input("Probabilidade de ERRO em % (0 a 100): "))
+    prob_erro = prob_erro_percentual / 100.0
 else:
     prob_erro = 0.0
 
