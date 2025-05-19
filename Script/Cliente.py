@@ -135,13 +135,10 @@ def temporizador_base():
         if tamanho_janela_antigo != tamanho_janela:
             print(f"[JANELA] Reduzida de {tamanho_janela_antigo} para {tamanho_janela} após timeout")
         
-        # No Go-Back-N, reenvia apenas os pacotes a partir da base (não confirmados)
-        print(f"[DEBUG] Reenviando pacotes não confirmados a partir da base {base}")
+        # No Go-Back-N, reenvia APENAS a partir da base (primeiro pacote não confirmado)
+        print(f"[DEBUG] Reenviando a partir da base {base} (primeiro pacote não confirmado)")
         for i in range(base, qtd_pacotes + 1):
-            if i not in pacotes_confirmados:
-                enviar_pacote_sem_timer(i, pacotes[i-1])
-            else:
-                print(f"[DEBUG] Pacote {i} já confirmado, pulando")
+            enviar_pacote_sem_timer(i, pacotes[i-1])
         
         # Reinicia o temporizador se ainda há pacotes não confirmados
         if base <= qtd_pacotes and not finalizou:
@@ -158,9 +155,8 @@ def iniciar_timer_base():
     
     # Só inicia timer se há pacotes não confirmados e não finalizou
     if base <= qtd_pacotes and not finalizou:
-        # Primeiro timeout com mais tempo para dar chance aos ACKs chegarem
-        timeout_inicial = 15.0 if not pacotes_confirmados else 10.0
-        timer = threading.Timer(timeout_inicial, temporizador_base)
+        # Timer inicial com 15 segundos para dar chance aos ACKs chegarem
+        timer = threading.Timer(15.0, temporizador_base)
         timer.start()
 
 def timer_individual(idx, pacote):
@@ -629,4 +625,4 @@ except Exception as e:
 finally:
     cancelar_timers()
     s.close()
-    print("Conexão fechada.")
+    print("Conexão fechada.")
