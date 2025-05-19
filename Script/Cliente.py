@@ -1,7 +1,7 @@
 import socket
 import threading
 from time import sleep
-import random  # Para simular erro/perda com probabilidade
+import random
 import time
 
 
@@ -11,7 +11,7 @@ def calcular_checksum(pacote):
 HOST = '127.0.0.1'
 PORT = 50000
 
-# Modo de operação
+# 1. Modo de operação
 print("Selecione o modo de operação:")
 print("1 - Go-Back-N")
 print("2 - Repetição Seletiva")
@@ -26,16 +26,16 @@ while True:
     except ValueError:
         print("Entrada inválida. Digite apenas números.")
 
-# Limite máximo de caracteres enviado por vez
+# 2. Tamanho máximo da mensagem
 while True:
     try:
-        limite_max = int(input("Digite o tamanho máximo da mensagem: ")) # quantidade de chars por comunicação
+        limite_max = int(input("Digite o tamanho máximo da mensagem: "))
         if 1 <= limite_max:
             break
     except ValueError:
         print("Entrada inválida. Digite apenas números.")
 
-# Modo de envio
+# 3. Modo de envio
 print("\nSelecione o modo de envio:")
 print("1 - Individual")
 print("2 - Lote")
@@ -50,15 +50,42 @@ while True:
     except ValueError:
         print("Entrada inválida. Digite apenas números.")
 
-# Tamanho de janela fixo em 4 com controle de congestionamento
-if modo_envio == 2:
-    tamanho_janela_inicial = 4  # Tamanho inicial fixo da janela
-    tamanho_janela = tamanho_janela_inicial  # Tamanho atual da janela
-    print(f"Tamanho da janela inicial: {tamanho_janela}")
-else:
-    tamanho_janela = 1  # No modo individual, a janela é sempre 1
+# 4. Simulação de problemas
+print("\nSelecione o tipo de simulação:")
+print("1 - Normal (sem problemas)")
+print("2 - Simular Falha de Integridade")
+print("3 - Simular Perda de Pacote")
 
-# Cliente digita a mensagem completa
+while True:
+    try:
+        tipo_simulacao = int(input("Digite o número (1, 2 ou 3): "))
+        if tipo_simulacao in [1, 2, 3]:
+            break
+        else:
+            print("Entrada inválida. Digite 1, 2 ou 3.")
+    except ValueError:
+        print("Entrada inválida. Digite apenas números.")
+
+# Configuração das simulações
+if tipo_simulacao == 2:  # Falha de Integridade
+    simular_erros = True
+    simular_perdas = False
+    prob_erro_percentual = int(input("Probabilidade de ERRO em % (0 a 100): "))
+    prob_erro = prob_erro_percentual / 100.0
+    prob_perda = 0.0
+elif tipo_simulacao == 3:  # Perda de Pacote
+    simular_erros = False
+    simular_perdas = True
+    prob_perda_percentual = int(input("Probabilidade de PERDA em % (0 a 100): "))
+    prob_perda = prob_perda_percentual / 100.0
+    prob_erro = 0.0
+else:  # Normal
+    simular_erros = False
+    simular_perdas = False
+    prob_erro = 0.0
+    prob_perda = 0.0
+
+# 5. Mensagem a ser enviada
 while True:
     mensagem = input("\nDigite a mensagem completa para enviar: ")
     if len(mensagem) > limite_max:
@@ -66,20 +93,9 @@ while True:
     else:
         break
 
-# Simulação separada de erros e perdas
-simular_perdas = input("\nDeseja simular PERDA de pacotes automaticamente? (s/n): ").strip().lower() == 's'
-if simular_perdas:
-    prob_perda_percentual = int(input("Probabilidade de PERDA em % (0 a 100): "))
-    prob_perda = prob_perda_percentual / 100.0
-else:
-    prob_perda = 0.0
-
-simular_erros = input("Deseja simular ERROS de pacotes automaticamente? (s/n): ").strip().lower() == 's'
-if simular_erros:
-    prob_erro_percentual = int(input("Probabilidade de ERRO em % (0 a 100): "))
-    prob_erro = prob_erro_percentual / 100.0
-else:
-    prob_erro = 0.0
+# Configuração da janela (sempre começa em 1)
+tamanho_janela = 1
+tamanho_janela_min = 1
 
 # Divide a mensagem em pacotes conforme tamanho máximo de 3 caracteres por pacote
 pacotes = [mensagem[i:i+3] for i in range(0, len(mensagem), 3)]
@@ -87,101 +103,99 @@ qtd_pacotes = len(pacotes)
 
 # Criação do socket
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.settimeout(5)
+s.settimeout(15)  # Timeout do socket aumentado para 15 segundos
 
 # Sistema de temporizadores
-timers = {}  # Dicionário para guardar temporizadores individuais (usado no modo individual)
-lock = threading.Lock()  # Lock para sincronização
-pacotes_enviados = {}  # Status dos pacotes (enviados mas não confirmados)
-base = 1  # Base da janela (próximo pacote esperando confirmação)
-proximo_seq = 1  # Próximo número de sequência a ser usado
-timer = None  # Timer para Go-Back-N no modo lote (um único timer para a janela inteira)
-
-# Variáveis de controle de congestionamento
-nacks_consecutivos = 0  # Contador de NACKs consecutivos
-threshold = 8  # Limite para o controle de congestionamento
-tamanho_janela_min = 1  # Tamanho mínimo da janela
+timers = {}
+lock = threading.Lock()
+pacotes_confirmados = set()  # Pacotes que receberam ACK
+base = 1
+proximo_seq = 1
+timer = None
+finalizou = False
 
 def temporizador_base():
     """Função chamada quando o temporizador da base expira no Go-Back-N"""
-    global timer, nacks_consecutivos, tamanho_janela
+    global timer, tamanho_janela, finalizou
     
-    print(f"[DEBUG] Temporizador da base {base} expirou! Hora: {time.strftime('%H:%M:%S')}")
+    if finalizou:
+        return
+        
+    print(f"[TIMEOUT] Retransmissão por timeout após 10s - Base {base}! Hora: {time.strftime('%H:%M:%S')}")
 
     with lock:
-        print(f"[TIMEOUT] Sem resposta para a janela a partir da base {base}. Reenviando todos os pacotes...")
-        # Timeout também é considerado um erro de transmissão
-        nacks_consecutivos += 1
-        # Reduzir o tamanho da janela em caso de timeout
-        if modo_envio == 2 and nacks_consecutivos > 0:
-            tamanho_janela_antigo = tamanho_janela
-            tamanho_janela = max(tamanho_janela // 2, tamanho_janela_min)
-            if tamanho_janela_antigo != tamanho_janela:
-                print(f"[CONGESTIONAMENTO] Janela reduzida de {tamanho_janela_antigo} para {tamanho_janela} após timeout")
+        # Verifica se ainda há pacotes não confirmados
+        if base > qtd_pacotes:
+            print("[DEBUG] Todos os pacotes já foram confirmados, cancelando timer")
+            return
+            
+        # Timeout - reduzir o tamanho da janela
+        tamanho_janela_antigo = tamanho_janela
+        tamanho_janela = max(tamanho_janela // 2, tamanho_janela_min)
+        if tamanho_janela_antigo != tamanho_janela:
+            print(f"[JANELA] Reduzida de {tamanho_janela_antigo} para {tamanho_janela} após timeout")
         
-        # Reenvia todos os pacotes a partir da base
-        for i in range(base, min(base + tamanho_janela, proximo_seq)):
-            if i <= qtd_pacotes:
+        # No Go-Back-N, reenvia apenas os pacotes a partir da base (não confirmados)
+        print(f"[DEBUG] Reenviando pacotes não confirmados a partir da base {base}")
+        for i in range(base, qtd_pacotes + 1):
+            if i not in pacotes_confirmados:
                 enviar_pacote_sem_timer(i, pacotes[i-1])
+            else:
+                print(f"[DEBUG] Pacote {i} já confirmado, pulando")
         
-        # Reinicia o temporizador
-        timer = threading.Timer(2.0, temporizador_base)
-        timer.start()
-        print(f"[DEBUG] Timer da base {base} reiniciado após timeout! Hora: {time.strftime('%H:%M:%S')}")
+        # Reinicia o temporizador se ainda há pacotes não confirmados
+        if base <= qtd_pacotes and not finalizou:
+            # Timeouts subsequentes com 10 segundos
+            timer = threading.Timer(10.0, temporizador_base)
+            timer.start()
 
 def iniciar_timer_base():
     """Inicia ou reinicia o temporizador da base para Go-Back-N"""
     global timer
     
-    # Cancela o timer anterior se existir
     if timer is not None:
         timer.cancel()
     
-    # Cria e inicia um novo timer
-    timer = threading.Timer(2.0, temporizador_base)
-    timer.start()
-    print(f"[DEBUG] Timer da base {base} iniciado! Hora: {time.strftime('%H:%M:%S')}")
+    # Só inicia timer se há pacotes não confirmados e não finalizou
+    if base <= qtd_pacotes and not finalizou:
+        # Primeiro timeout com mais tempo para dar chance aos ACKs chegarem
+        timeout_inicial = 15.0 if not pacotes_confirmados else 10.0
+        timer = threading.Timer(timeout_inicial, temporizador_base)
+        timer.start()
 
 def timer_individual(idx, pacote):
     """Função chamada quando um temporizador individual expira"""
-    global nacks_consecutivos, tamanho_janela
+    global tamanho_janela
     
-    print(f"[TIMEOUT] Sem resposta para o pacote {idx}. Reenviando...")
-    # Timeout também é considerado um erro de transmissão
-    nacks_consecutivos += 1
+    if finalizou:
+        return
+        
+    print(f"[TIMEOUT] Retransmissão por timeout após 10s - Pacote {idx}")
     
-    # Reduzir o tamanho da janela em caso de timeout
-    if modo_envio == 2 and nacks_consecutivos > 0:
-        tamanho_janela_antigo = tamanho_janela
-        tamanho_janela = max(tamanho_janela // 2, tamanho_janela_min)
-        if tamanho_janela_antigo != tamanho_janela:
-            print(f"[CONGESTIONAMENTO] Janela reduzida de {tamanho_janela_antigo} para {tamanho_janela} após timeout")
+    # Timeout - reduzir o tamanho da janela
+    tamanho_janela_antigo = tamanho_janela
+    tamanho_janela = max(tamanho_janela // 2, tamanho_janela_min)
+    if tamanho_janela_antigo != tamanho_janela:
+        print(f"[JANELA] Reduzida de {tamanho_janela_antigo} para {tamanho_janela} após timeout")
     
     enviar_pacote_sem_timer(idx, pacote)
     
     # Reinicia o temporizador
-    timers[idx] = threading.Timer(2.0, lambda: timer_individual(idx, pacote))
-    timers[idx].start()
+    if not finalizou:
+        timers[idx] = threading.Timer(10.0, lambda: timer_individual(idx, pacote))
+        timers[idx].start()
 
-def enviar_pacote(idx, pacote):
-    """Envia um pacote e gerencia temporizadores conforme o modo de operação"""
-    global timer
-    
+def enviar_pacote_inicial(idx, pacote):
+    """Envia um pacote inicial (usado no modo lote)"""
     # Simulação de perda
     if simular_perdas and random.random() < prob_perda:
-        print(f"[SIMULAÇÃO] Pacote {idx} NÃO enviado (simulação de PERDA).")
-        
-        # Se for o pacote base e estamos no modo Go-Back-N, precisamos garantir que o timer seja iniciado
-        if idx == base and modo_operacao == 1 and modo_envio == 2:
-            print(f"[DEBUG] Iniciando timer para o pacote base {base} mesmo após perda simulada")
-            iniciar_timer_base()
-            
-        return False  # Indica que o pacote não foi enviado
-    
+        print(f"[SIMULAÇÃO] Pacote {idx} NÃO enviado (simulação de PERDA) - Retransmissão por timeout em ~10s.")
+        return False
+
     # Simulação de erro
     if simular_erros and random.random() < prob_erro:
         checksum = (calcular_checksum(pacote) + 1) % 256
-        print(f"[SIMULAÇÃO] Pacote {idx} enviado com CHECKSUM ERRADO.")
+        print(f"[SIMULAÇÃO] Pacote {idx} enviado com CHECKSUM ERRADO - Retransmissão imediata por NACK.")
     else:
         checksum = calcular_checksum(pacote)
 
@@ -189,61 +203,78 @@ def enviar_pacote(idx, pacote):
     try:
         s.sendall(pacote_enviado.encode())
         print(f"Pacote {idx} enviado: '{pacote_enviado}'")
-        pacotes_enviados[idx] = True
+        return True
     except Exception as e:
         print(f"Erro ao enviar pacote {idx}: {e}")
         return False
 
-    # Gerencia temporizadores de forma diferente para cada modo
+def enviar_pacote(idx, pacote):
+    """Envia um pacote e gerencia temporizadores conforme o modo de operação"""
+    global timer
+    
+    # Simulação de perda
+    if simular_perdas and random.random() < prob_perda:
+        print(f"[SIMULAÇÃO] Pacote {idx} NÃO enviado (simulação de PERDA) - Retransmissão por timeout em ~10s.")
+        
+        if idx == base and modo_operacao == 1 and modo_envio == 2:
+            iniciar_timer_base()
+            
+        return False
+
+    # Simulação de erro
+    if simular_erros and random.random() < prob_erro:
+        checksum = (calcular_checksum(pacote) + 1) % 256
+        print(f"[SIMULAÇÃO] Pacote {idx} enviado com CHECKSUM ERRADO - Retransmissão imediata por NACK.")
+    else:
+        checksum = calcular_checksum(pacote)
+
+    pacote_enviado = f"{checksum:03d}|{idx:03d}|{pacote}"
+    try:
+        s.sendall(pacote_enviado.encode())
+        print(f"Pacote {idx} enviado: '{pacote_enviado}'")
+    except Exception as e:
+        print(f"Erro ao enviar pacote {idx}: {e}")
+        return False
+
+    # Gerencia temporizadores
     if modo_envio == 1:  # Individual
-        # No modo individual, cada pacote tem seu próprio temporizador
         if idx in timers:
             timers[idx].cancel()
-        timers[idx] = threading.Timer(2.0, lambda: timer_individual(idx, pacote))
+        timers[idx] = threading.Timer(10.0, lambda: timer_individual(idx, pacote))
         timers[idx].start()
     else:  # Lote
         if modo_operacao == 1:  # Go-Back-N
-            if idx == base:  # Apenas iniciar o timer quando for o pacote base
+            # Inicia o timer apenas se é o primeiro pacote da janela
+            if idx == base:
                 iniciar_timer_base()
-        else:  # Repetição Seletiva - cada pacote tem seu próprio timer
+        else:  # Repetição Seletiva
             def timeout_seletivo():
+                if finalizou:
+                    return
                 with lock:
-                    if idx in pacotes_enviados:  # Ainda não foi confirmado
-                        print(f"[TIMEOUT] Sem resposta para o pacote {idx}. Reenviando...")
-                        # Timeout também é considerado um erro de transmissão
-                        global nacks_consecutivos, tamanho_janela
-                        nacks_consecutivos += 1
-                        
-                        # Reduzir o tamanho da janela em caso de timeout
-                        if nacks_consecutivos > 0:
-                            tamanho_janela_antigo = tamanho_janela
-                            tamanho_janela = max(tamanho_janela // 2, tamanho_janela_min)
-                            if tamanho_janela_antigo != tamanho_janela:
-                                print(f"[CONGESTIONAMENTO] Janela reduzida de {tamanho_janela_antigo} para {tamanho_janela} após timeout")
+                    if idx not in pacotes_confirmados:
+                        print(f"[TIMEOUT] Retransmissão por timeout após 10s - Pacote {idx}")
+                        global tamanho_janela
+                        tamanho_janela_antigo = tamanho_janela
+                        tamanho_janela = max(tamanho_janela // 2, tamanho_janela_min)
+                        if tamanho_janela_antigo != tamanho_janela:
+                            print(f"[JANELA] Reduzida de {tamanho_janela_antigo} para {tamanho_janela} após timeout")
                         
                         enviar_pacote_sem_timer(idx, pacote)
-                        # Reinicia o temporizador
-                        timer_individual = threading.Timer(2.0, timeout_seletivo)
-                        timer_individual.start()
-                        pacotes_enviados[idx] = (timer_individual, True)  # Armazena o timer e estado
+                        if not finalizou:
+                            timer_individual = threading.Timer(10.0, timeout_seletivo)
+                            timer_individual.start()
+                            timers[idx] = timer_individual
             
-            # Inicia o temporizador para este pacote específico (Repetição Seletiva)
-            timer_individual = threading.Timer(2.0, timeout_seletivo)
+            timer_individual = threading.Timer(10.0, timeout_seletivo)
             timer_individual.start()
-            pacotes_enviados[idx] = (timer_individual, True)  # Armazena o timer e estado
-    return True  # Indica que o pacote foi enviado
+            timers[idx] = timer_individual
+    return True
 
 def enviar_pacote_sem_timer(idx, pacote):
     """Envia um pacote sem gerenciar temporizadores (usado em retransmissões)"""
-    # Simulação de perda na retransmissão - NÃO aplicamos aqui para garantir a retransmissão
-    # sempre aconteça quando solicitada explicitamente
-    
-    # Simulação de erro na retransmissão
-    if simular_erros and random.random() < prob_erro:
-        checksum = (calcular_checksum(pacote) + 1) % 256
-        print(f"[SIMULAÇÃO] Pacote {idx} reenviado com CHECKSUM ERRADO.")
-    else:
-        checksum = calcular_checksum(pacote)
+    # NÃO simula erro nem perda na retransmissão (conforme solicitado)
+    checksum = calcular_checksum(pacote)
         
     pacote_enviado = f"{checksum:03d}|{idx:03d}|{pacote}"
     try:
@@ -254,192 +285,176 @@ def enviar_pacote_sem_timer(idx, pacote):
 
 def cancelar_timers():
     """Cancela todos os temporizadores ativos"""
-    global timer
+    global timer, finalizou
     
-    # Cancela o timer principal do Go-Back-N
+    finalizou = True
+    
     if timer is not None:
         timer.cancel()
+        timer = None
     
-    # Cancela os timers individuais
     for t in timers.values():
         if isinstance(t, threading.Timer):
             t.cancel()
-    
-    # Cancela os timers do Repetição Seletiva
-    if modo_operacao == 2 and modo_envio == 2:  # Repetição Seletiva em lote
-        for idx in list(pacotes_enviados.keys()):
-            if isinstance(pacotes_enviados[idx], tuple):
-                timer_individual, _ = pacotes_enviados[idx]
-                timer_individual.cancel()
-
-def verificador_de_timeout():
-    """Thread para verificar periodicamente se o timer da base está funcionando"""
-    global base, timer
-    
-    while base <= qtd_pacotes:
-        time.sleep(3)  # Verifica a cada 3 segundos
-        with lock:
-            if base <= qtd_pacotes and timer is None and modo_operacao == 1 and modo_envio == 2:
-                print(f"[ALERTA] Timer da base {base} não está ativo! Reiniciando...")
-                iniciar_timer_base()
+    timers.clear()
 
 def thread_receptor():
     """Thread para receber e processar ACKs/NACKs do servidor"""
-    global base, proximo_seq, timer, tamanho_janela, nacks_consecutivos
+    global base, proximo_seq, timer, tamanho_janela, finalizou
     
-    while base <= qtd_pacotes:
+    print("[DEBUG] Thread receptora iniciada")
+    while base <= qtd_pacotes and not finalizou:
         try:
             resposta = s.recv(1024).decode()
+            print(f"[DEBUG] Resposta recebida: '{resposta}'")
 
-            # Dividir respostas concatenadas
+            # Trata múltiplas respostas em uma mensagem
             respostas = resposta.replace("ack|", "\nack|").replace("nack|", "\nnack|").replace("todos_pacotes_recebidos", "\ntodos_pacotes_recebidos").split("\n")
             for resp in respostas:
-                if not resp:
+                if not resp.strip():
                     continue
 
                 if resp.startswith("ack|"):
                     try:
                         numero_texto = resp.split("ack|")[1].split()[0]
                         numero_pacote = int(numero_texto)
-                        print(f"[ACK] Pacote {numero_pacote} confirmado.")
                         
-                        # ACK bem-sucedido, zerar contador de NACKs consecutivos
-                        nacks_consecutivos = 0
+                        # No Go-Back-N lote, um ACK confirma todos os pacotes até aquele número
+                        if modo_operacao == 1 and modo_envio == 2:
+                            print(f"[ACK] Pacote {numero_pacote} confirmado (e todos anteriores implicitamente).")
+                        else:
+                            print(f"[ACK] Pacote {numero_pacote} confirmado.")
                         
-                        # Em caso de transmissão bem-sucedida, aumentamos gradualmente o tamanho da janela
-                        if modo_envio == 2:
-                            # Se já alcançamos o threshold, cresce linearmente (+1)
-                            if tamanho_janela >= threshold:
-                                if tamanho_janela < 2 * threshold:  # Limite máximo da janela
-                                    tamanho_janela_antigo = tamanho_janela
-                                    tamanho_janela += 1
-                                    print(f"[CONGESTIONAMENTO] Janela aumentada linearmente de {tamanho_janela_antigo} para {tamanho_janela}")
-                            else:
-                                # Antes do threshold, cresce exponencialmente (dobra)
-                                tamanho_janela_antigo = tamanho_janela
-                                tamanho_janela = min(tamanho_janela * 2, threshold)
-                                if tamanho_janela_antigo != tamanho_janela:
-                                    print(f"[CONGESTIONAMENTO] Janela aumentada exponencialmente de {tamanho_janela_antigo} para {tamanho_janela}")
+                        # ACK bem-sucedido - aumentar janela em 1
+                        tamanho_janela_antigo = tamanho_janela
+                        tamanho_janela += 1
+                        print(f"[JANELA] Aumentada de {tamanho_janela_antigo} para {tamanho_janela}")
+                        
                     except Exception as e:
                         print(f"Erro ao processar ACK: {e}")
                         continue
 
                     with lock:
                         if modo_envio == 1:  # Individual
-                            # Cancela o temporizador individual
                             if numero_pacote in timers:
-                                timers[numero_pacote].cancel()      
+                                timers[numero_pacote].cancel()
+                                del timers[numero_pacote]
+                            pacotes_confirmados.add(numero_pacote)    
                         else:  # Lote
                             if modo_operacao == 1:  # Go-Back-N
-                                # No Go-Back-N, confirma cumulativamente até o número recebido
+                                # No Go-Back-N lote, um ACK confirma todos os pacotes até aquele número
                                 if numero_pacote >= base:
-                                    # Remove todos os pacotes até numero_pacote da lista de enviados
+                                    if numero_pacote > base:
+                                        print(f"[DEBUG] ACK {numero_pacote} confirma pacotes {base} até {numero_pacote} implicitamente")
+                                    else:
+                                        print(f"[DEBUG] ACK {numero_pacote} confirma pacote {numero_pacote}")
+                                    
+                                    # Confirma todos os pacotes até numero_pacote
                                     for i in range(base, numero_pacote + 1):
-                                        if i in pacotes_enviados:
-                                            del pacotes_enviados[i]
+                                        pacotes_confirmados.add(i)
+                                    
                                     # Atualiza a base para o próximo pacote não confirmado
                                     base = numero_pacote + 1
+                                    print(f"[DEBUG] Nova base: {base}")
 
-                                    # Avanço da janela
-                                    while proximo_seq < base + tamanho_janela and proximo_seq <= qtd_pacotes:
-                                            enviar_pacote(proximo_seq, pacotes[proximo_seq-1])
-                                            proximo_seq += 1
-                                    
-                                    # Reinicia o temporizador para a nova base (se ainda houver pacotes a confirmar)
-                                    if base <= qtd_pacotes:
-                                        iniciar_timer_base()
-                                    else:
-                                        # Todos os pacotes foram confirmados, cancela o temporizador
+                                    # Cancela o timer da base se todos foram confirmados
+                                    if base > qtd_pacotes:
                                         if timer is not None:
                                             timer.cancel()
                                             timer = None
+                                        print(f"[DEBUG] Todos os pacotes confirmados, timer cancelado")
+                                        finalizou = True
+                                        return
+                                    else:
+                                        # Reinicia o timer se ainda há pacotes pendentes
+                                        iniciar_timer_base()
                             
                             else:  # Repetição Seletiva
-                                # No Repetição Seletiva, confirma apenas o pacote específico
-                                if numero_pacote in pacotes_enviados:
-                                    # Cancela o temporizador individual
-                                    if isinstance(pacotes_enviados[numero_pacote], tuple):
-                                        timer_individual, _ = pacotes_enviados[numero_pacote]
-                                        timer_individual.cancel()
-                                    
-                                    # Remove o pacote da lista de enviados
-                                    del pacotes_enviados[numero_pacote]
-                                    
-                                    # Verifica se a base pode avançar
-                                    while base not in pacotes_enviados and base <= qtd_pacotes:
-                                        base += 1
-                                    
-                                    # Envia mais pacotes se possível
-                                    while proximo_seq < base + tamanho_janela and proximo_seq <= qtd_pacotes:
-                                        enviar_pacote(proximo_seq, pacotes[proximo_seq-1])
-                                        proximo_seq += 1
+                                pacotes_confirmados.add(numero_pacote)
+                                
+                                if numero_pacote in timers:
+                                    timers[numero_pacote].cancel()
+                                    del timers[numero_pacote]
+                                
+                                print(f"[DEBUG] Pacote {numero_pacote} confirmado")
+                                
+                                # Atualiza a base para o próximo pacote não confirmado
+                                while base in pacotes_confirmados and base <= qtd_pacotes:
+                                    base += 1
+                                
+                                print(f"[DEBUG] Nova base: {base}")
+                                
+                                # Se todos foram confirmados
+                                if base > qtd_pacotes:
+                                    cancelar_timers()
+                                    finalizou = True
+                                    return
 
                 elif resp.startswith("nack|"):
                     try:
                         numero_pacote = int(resp.split("|")[1])
-                        print(f"[NACK] Erro no pacote {numero_pacote}, reenviando...")
+                        print(f"[NACK] Retransmissão IMEDIATA por falha de integridade - Pacote {numero_pacote}")
                         
-                        # Incrementar contador de NACKs consecutivos e reduzir tamanho da janela
-                        nacks_consecutivos += 1
+                        # NACK - reduzir janela pela metade
+                        tamanho_janela_antigo = tamanho_janela
+                        tamanho_janela = max(tamanho_janela // 2, tamanho_janela_min)
+                        print(f"[JANELA] Reduzida de {tamanho_janela_antigo} para {tamanho_janela} após NACK")
                         
-                        # Reduzir tamanho da janela em caso de NACK (modo lote)
-                        if modo_envio == 2:
-                            tamanho_janela_antigo = tamanho_janela
-                            # Se recebemos NACK, voltamos ao slow start (reduz pela metade)
-                            tamanho_janela = max(tamanho_janela // 2, tamanho_janela_min)
-                            if tamanho_janela_antigo != tamanho_janela:
-                                print(f"[CONGESTIONAMENTO] Janela reduzida de {tamanho_janela_antigo} para {tamanho_janela} após NACK")
                     except Exception as e:
                         print(f"Erro ao processar NACK: {e}")
                         continue
 
                     with lock:
                         if modo_envio == 1:  # Individual
-                            # Cancela o temporizador individual
                             if numero_pacote in timers:
                                 timers[numero_pacote].cancel()
-                            # Reenvia o pacote específico
                             if numero_pacote <= qtd_pacotes:
                                 enviar_pacote(numero_pacote, pacotes[numero_pacote-1])
                         else:  # Lote
                             if modo_operacao == 1:  # Go-Back-N
-                                # No Go-Back-N, volta a base para o pacote com erro
+                                # Atualiza a base para o pacote com erro
                                 base = numero_pacote
+                                print(f"[DEBUG] NACK recebido, nova base: {base}")
                                 
-                                # Reenvia todos os pacotes a partir da base, limitado pelo tamanho atual da janela
-                                for i in range(base, min(base + tamanho_janela, proximo_seq)):
-                                    if i <= qtd_pacotes:
-                                        enviar_pacote_sem_timer(i, pacotes[i-1])
+                                # No Go-Back-N, reenvia a partir do pacote com erro até o final
+                                for i in range(base, qtd_pacotes + 1):
+                                    enviar_pacote_sem_timer(i, pacotes[i-1])
                                 
-                                # Reinicia o temporizador para a nova base
                                 iniciar_timer_base()
                             
                             else:  # Repetição Seletiva
-                                # No Repetição Seletiva, reenvia apenas o pacote com erro
+                                # No Repetição Seletiva em lote, reenvia apenas o pacote com erro
                                 if numero_pacote <= qtd_pacotes:
-                                    # Cancela o temporizador anterior
-                                    if numero_pacote in pacotes_enviados and isinstance(pacotes_enviados[numero_pacote], tuple):
-                                        timer_individual, _ = pacotes_enviados[numero_pacote]
-                                        timer_individual.cancel()
-                                    
-                                    # Reenvia o pacote
-                                    enviar_pacote(numero_pacote, pacotes[numero_pacote-1])
+                                    print(f"[DEBUG] Reenviando pacote {numero_pacote} após NACK")
+                                    enviar_pacote_sem_timer(numero_pacote, pacotes[numero_pacote-1])
 
                 elif resp.strip() == "todos_pacotes_recebidos":
                     print("\nServidor confirmou recebimento de todos os pacotes.")
+                    print("[DEBUG] Thread receptora finalizando normalmente")
+                    finalizou = True
                     return
 
         except socket.timeout:
+            print("[DEBUG] Timeout na thread receptora, continuando...")
             continue
         except Exception as e:
             print(f"Erro na thread receptora: {e}")
             break
+    
+    print("[DEBUG] Thread receptora finalizou - todos os pacotes processados")
         
 try:
     s.connect((HOST, PORT))
     print(f"\nConectado ao servidor {HOST}:{PORT}")
     
     # Envia handshake
+    modo_str = "Go-Back-N" if modo_operacao == 1 else "Repetição Seletiva"
+    envio_str = "Individual" if modo_envio == 1 else "Lote"
+    simulacao_str = ["Normal", "Falha de Integridade", "Perda de Pacote"][tipo_simulacao - 1]
+    
+    print(f"\nConfiguração: {modo_str} + {envio_str} + {simulacao_str}")
+    print(f"Janela inicial: {tamanho_janela}")
+    
     mensagem_handshake = f"modo={modo_operacao},limite máximo={limite_max}, envio={modo_envio},qtd_pacotes={qtd_pacotes},janela={tamanho_janela}"
     s.sendall(mensagem_handshake.encode())
     
@@ -451,22 +466,18 @@ try:
         if modo_envio == 1:  # Modo Individual
             print("Enviando em modo INDIVIDUAL...\n")
             
-            # Implementação revisada do modo individual
             idx = 1
             max_tentativas_por_pacote = 5
             
             while idx <= len(pacotes):
                 pacote = pacotes[idx-1]
                 
-                # Tenta enviar o pacote atual
                 enviado = enviar_pacote(idx, pacote)
                 if not enviado:
-                    # Se a simulação de perda impediu o envio, precisamos reenviar explicitamente
                     print(f"[RECUPERAÇÃO] Tentando reenviar pacote {idx} após simulação de perda...")
                     sleep(0.5)
                     enviar_pacote_sem_timer(idx, pacote)
                 
-                # Aguarda confirmação com timeout
                 tentativas = 0
                 pacote_confirmado = False
                 
@@ -474,7 +485,6 @@ try:
                     try:
                         resposta = s.recv(1024).decode()
                         
-                        # Dividir respostas concatenadas
                         respostas = resposta.replace("ack|", "\nack|").replace("nack|", "\nnack|").split("\n")
                         for resp in respostas:
                             if not resp:
@@ -486,12 +496,17 @@ try:
                                     numero_pacote = int(numero_texto)
                                     print(f"[ACK] Pacote {numero_pacote} confirmado.")
                                     
-                                    # Verifica se é o pacote atual
                                     if numero_pacote == idx:
                                         pacote_confirmado = True
-                                        # Cancela o temporizador individual se existir
+                                        # Aumentar janela em 1
+                                        tamanho_janela_antigo = tamanho_janela
+                                        tamanho_janela += 1
+                                        print(f"[JANELA] Aumentada de {tamanho_janela_antigo} para {tamanho_janela}")
+                                        
                                         if idx in timers:
                                             timers[idx].cancel()
+                                            del timers[idx]
+                                        pacotes_confirmados.add(idx)
                                         break
                                     
                                 except Exception as e:
@@ -501,15 +516,17 @@ try:
                             elif resp.startswith("nack|"):
                                 try:
                                     numero_pacote = int(resp.split("|")[1])
-                                    print(f"[NACK] Erro no pacote {numero_pacote}, reenviando...")
+                                    print(f"[NACK] Retransmissão IMEDIATA por falha de integridade - Pacote {numero_pacote}")
                                     
-                                    # Verifica se é o pacote atual
                                     if numero_pacote == idx:
-                                        # Cancela o temporizador individual se existir
+                                        # Reduzir janela pela metade
+                                        tamanho_janela_antigo = tamanho_janela
+                                        tamanho_janela = max(tamanho_janela // 2, tamanho_janela_min)
+                                        print(f"[JANELA] Reduzida de {tamanho_janela_antigo} para {tamanho_janela} após NACK")
+                                        
                                         if idx in timers:
                                             timers[idx].cancel()
                                         
-                                        # Reenvia o pacote
                                         enviar_pacote(idx, pacotes[idx-1])
                                         tentativas += 1
                                 except Exception as e:
@@ -521,8 +538,7 @@ try:
                             
                     except socket.timeout:
                         tentativas += 1
-                        print(f"[TIMEOUT] Tentativa {tentativas} aguardando ACK/NACK para pacote {idx}...")
-                        # Reenviar o pacote após timeout
+                        print(f"[TIMEOUT] Tentativa {tentativas} aguardando ACK/NACK para pacote {idx} - Retransmissão por timeout...")
                         if tentativas < max_tentativas_por_pacote:
                             enviar_pacote_sem_timer(idx, pacote)
                 
@@ -534,46 +550,74 @@ try:
                             print("Envio interrompido pelo usuário.")
                             break
                 
-                # Avança para o próximo pacote
                 if pacote_confirmado or tentativas >= max_tentativas_por_pacote:
                     idx += 1
                     if idx <= len(pacotes):
-                        sleep(0.5)  # Pequena pausa entre pacotes
+                        sleep(0.5)
 
-        else:  # Modo Lote (Janela Deslizante)
-            print(f"Enviando em modo LOTE com janela de controle de congestionamento (inicial={tamanho_janela})...\n")
+        else:  # Modo Lote
+            print(f"Enviando em modo LOTE com janela inicial={tamanho_janela}...\n")
+            
+            print("Enviando todos os pacotes de uma vez...")
+            # Envia todos os pacotes sem aguardar ACKs
+            pelo_menos_um_enviado = False
+            for i in range(1, qtd_pacotes + 1):
+                enviado = enviar_pacote_inicial(i, pacotes[i-1])
+                if enviado:
+                    pelo_menos_um_enviado = True
+            
+            # Inicia timer apenas se pelo menos um pacote foi enviado
+            if pelo_menos_um_enviado:
+                if modo_operacao == 1:  # Go-Back-N
+                    iniciar_timer_base()
+                else:  # Repetição Seletiva - inicia timers para todos os pacotes
+                    for i in range(1, qtd_pacotes + 1):
+                        def timeout_seletivo(idx=i):
+                            if finalizou:
+                                return
+                            with lock:
+                                if idx not in pacotes_confirmados:
+                                    print(f"[TIMEOUT] Retransmissão por timeout após 15s - Pacote {idx}")
+                                    global tamanho_janela
+                                    tamanho_janela_antigo = tamanho_janela
+                                    tamanho_janela = max(tamanho_janela // 2, tamanho_janela_min)
+                                    if tamanho_janela_antigo != tamanho_janela:
+                                        print(f"[JANELA] Reduzida de {tamanho_janela_antigo} para {tamanho_janela} após timeout")
+                                    
+                                    enviar_pacote_sem_timer(idx, pacotes[idx-1])
+                                    
+                                    # Reinicia o timer
+                                    if not finalizou:
+                                        timer_individual = threading.Timer(15.0, timeout_seletivo)
+                                        timer_individual.start()
+                                        timers[idx] = timer_individual
+                        
+                        timer_individual = threading.Timer(15.0, timeout_seletivo)
+                        timer_individual.start()
+                        timers[i] = timer_individual
             
             # Inicia thread para receber ACKs/NACKs
             receptor = threading.Thread(target=thread_receptor)
             receptor.daemon = True
             receptor.start()
             
-            # Adicione o verificador de timeout
-            verificador = threading.Thread(target=verificador_de_timeout)
-            verificador.daemon = True
-            verificador.start()
-
-            # Envia os primeiros pacotes (até o tamanho da janela)
-            with lock:
-                while proximo_seq <= min(tamanho_janela, qtd_pacotes):
-                    enviar_pacote(proximo_seq, pacotes[proximo_seq-1])
-                    proximo_seq += 1
-            
-            # Garantir que o timer da base seja iniciado mesmo se o primeiro pacote for perdido
-            if proximo_seq == 2 and modo_operacao == 1:  # Go-Back-N
-                print("[DEBUG] Verificando se o timer da base foi iniciado...")
-                if timer is None:
-                    print("[DEBUG] Timer da base não foi iniciado! Iniciando agora...")
-                    iniciar_timer_base()
-
-            # Aguarda até que todos os pacotes sejam confirmados
-            while base <= qtd_pacotes:
+            # Aguarda até que todos os pacotes sejam confirmados ou timeout
+            timeout_counter = 0
+            while base <= qtd_pacotes and not finalizou:
                 sleep(0.1)
+                timeout_counter += 1
+                # Timeout máximo de 60 segundos
+                if timeout_counter > 600:
+                    print("[ERRO] Timeout máximo atingido, finalizando...")
+                    break
 
         print("\nAguardando últimas confirmações...")
-        sleep(5)  # Espera 5 segundos para ver todos os ACKs
+        sleep(3)
     
-        print("\nTodos os pacotes foram enviados e confirmados.")
+        if len(pacotes_confirmados) == qtd_pacotes:
+            print("\nTodos os pacotes foram enviados e confirmados.")
+        else:
+            print(f"\nProcesso finalizado. Pacotes confirmados: {len(pacotes_confirmados)}/{qtd_pacotes}")
             
     elif resposta == "nack_handshake":
         print("Servidor rejeitou o handshake. Verifique os parâmetros e tente novamente.")
