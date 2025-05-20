@@ -442,7 +442,12 @@ try:
                     try:
                         resposta = s.recv(1024).decode()
                         
-                        respostas = resposta.replace("ack|", "\nack|").replace("nack|", "\nnack|").split("\n")
+                        # CORREÇÃO: Parser mais robusto para modo Individual
+                        if "nack|" in resposta:
+                            respostas = [r.strip() for r in resposta.split() if r.strip().startswith(("ack|", "nack|"))]
+                        else:
+                            respostas = [resposta.strip()]
+                            
                         for resp in respostas:
                             if not resp:
                                 continue
